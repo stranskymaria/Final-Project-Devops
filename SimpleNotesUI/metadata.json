@@ -1,0 +1,5 @@
+{
+  "name": "Gemini Notes",
+  "description": "A simple and elegant note-taking application built with React and Tailwind CSS, allowing users to perform CRUD operations on their notes.",
+  "requestFramePermissions": []
+}

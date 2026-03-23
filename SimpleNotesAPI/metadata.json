@@ -1,0 +1,5 @@
+{
+  "name": "Express Note Taking API",
+  "description": "A REST API for a simple note-taking application built with Express.js, TypeScript, and MySQL. It includes CRUD operations, unit tests, API tests, and OpenAPI documentation.",
+  "requestFramePermissions": []
+}
