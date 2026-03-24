@@ -1,5 +1,9 @@
 CREATE DATABASE IF NOT EXISTS notes_db_test;
 
+GRANT ALL PRIVILEGES ON notes_db.* TO 'appuser'@'%';
+GRANT ALL PRIVILEGES ON notes_db_test.* TO 'appuser'@'%';
+FLUSH PRIVILEGES;
+
 USE notes_db;
 
 CREATE TABLE IF NOT EXISTS notes (

@@ -1,7 +1,12 @@
 import request from 'supertest';
 import app from '../../src/app';
+import pool from '../../src/services/db';
 
 describe('Health Endpoint', () => {
+    afterAll(async () => {
+        await pool.end();
+    });
+
     it('should return health status with 200 status code', async () => {
         const response = await request(app)
             .get('/api/health')

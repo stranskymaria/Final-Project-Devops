@@ -22,10 +22,12 @@ describe('Notes Controller - Unit Tests', () => {
   let mockRequest: Partial<Request>;
   let mockResponse: Partial<Response>;
   let responseObject: any;
+  let consoleErrorSpy: jest.SpiedFunction<typeof console.error>;
 
   beforeEach(() => {
     mockRequest = {};
     responseObject = {};
+    consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
     mockResponse = {
       status: jest.fn().mockReturnThis() as any,
       json: jest.fn().mockImplementation((result) => {
@@ -37,6 +39,7 @@ describe('Notes Controller - Unit Tests', () => {
   });
 
   afterEach(() => {
+    consoleErrorSpy.mockRestore();
     jest.clearAllMocks();
   });
 
