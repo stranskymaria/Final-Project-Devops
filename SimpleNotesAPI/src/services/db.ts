@@ -1,8 +1,6 @@
 
 import mysql from 'mysql2/promise';
 import dotenv from 'dotenv';
-// FIX: Import 'process' to provide type definitions for process.exit.
-import process from 'process';
 
 dotenv.config();
 
@@ -27,17 +25,28 @@ const dbConfig = {
 
 const pool = mysql.createPool(dbConfig);
 
+const dbLabel = isTest ? 'test' : 'development';
+
+const verifyConnection = async (attempt = 1): Promise<void> => {
+  try {
+    const connection = await pool.getConnection();
+    console.log(`Successfully connected to ${dbLabel} database.`);
+    connection.release();
+  } catch (error) {
+    const retryDelayMs = Math.min(1000 * attempt, 5000);
+    console.error(
+      `Error connecting to ${dbLabel} database on attempt ${attempt}. Retrying in ${retryDelayMs}ms.`,
+      error
+    );
+    setTimeout(() => {
+      void verifyConnection(attempt + 1);
+    }, retryDelayMs);
+  }
+};
+
 // Only establish real connection if not running unit tests
 if (!isUnitTest) {
-  pool.getConnection()
-    .then(connection => {
-      console.log(`Successfully connected to ${isTest ? 'test' : 'development'} database.`);
-      connection.release();
-    })
-    .catch(err => {
-      console.error(`Error connecting to ${isTest ? 'test' : 'development'} database:`, err.stack);
-      process.exit(1);
-    });
+  void verifyConnection();
 }
 
 export default pool;

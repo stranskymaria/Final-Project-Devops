@@ -1,11 +1,13 @@
 FROM node:20
 
-WORKDIR /app
+WORKDIR /app/SimpleNotesUI
 
-COPY package*.json ./
+COPY SimpleNotesUI/package*.json ./
 RUN npm install --legacy-peer-deps
 
-COPY . .
+COPY app-version.json /app/app-version.json
+COPY scripts/ /app/scripts/
+COPY SimpleNotesUI/ .
 
 EXPOSE 5173
 

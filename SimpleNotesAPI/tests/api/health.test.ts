@@ -1,6 +1,7 @@
 import request from 'supertest';
 import app from '../../src/app';
 import pool from '../../src/services/db';
+import appVersion from '../../../app-version.json';
 
 describe('Health Endpoint', () => {
     afterAll(async () => {
@@ -16,7 +17,8 @@ describe('Health Endpoint', () => {
         expect(response.body).toHaveProperty('timestamp');
         expect(response.body).toHaveProperty('uptime');
         expect(response.body).toHaveProperty('service', 'Notes API');
-        expect(response.body).toHaveProperty('version');
+        expect(response.body).toHaveProperty('version', appVersion.version);
+        expect(response.body).toHaveProperty('buildSha', null);
         expect(response.body).toHaveProperty('database');
         expect(response.body.database).toHaveProperty('status');
         expect(response.body.database).toHaveProperty('responseTime');

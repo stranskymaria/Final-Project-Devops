@@ -1,0 +1,34 @@
+services:
+  api:
+    image: ${API_IMAGE}
+    container_name: simplenotes-staging-api
+    restart: unless-stopped
+    environment:
+      PORT: ${API_PORT:-3001}
+      APP_BUILD_SHA: ${APP_BUILD_SHA:-}
+      APP_DEPLOY_COLOR: ${APP_DEPLOY_COLOR:-}
+      DB_HOST: ${DB_HOST}
+      DB_PORT: ${DB_PORT:-3306}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME: ${DB_NAME:-notes_db}
+      TEST_DB_HOST: ${TEST_DB_HOST:-${DB_HOST}}
+      TEST_DB_PORT: ${TEST_DB_PORT:-3306}
+      TEST_DB_USER: ${TEST_DB_USER:-${DB_USER}}
+      TEST_DB_PASSWORD: ${TEST_DB_PASSWORD:-${DB_PASSWORD}}
+      TEST_DB_NAME: ${TEST_DB_NAME:-notes_db_test}
+    ports:
+      - "${API_PORT:-3001}:3001"
+
+  ui:
+    image: ${UI_IMAGE}
+    container_name: simplenotes-staging-ui
+    restart: unless-stopped
+    depends_on:
+      - api
+    environment:
+      APP_BUILD_SHA: ${APP_BUILD_SHA:-}
+      APP_DEPLOY_COLOR: ${APP_DEPLOY_COLOR:-}
+      VITE_API_URL: ${VITE_API_URL:-http://localhost:3001}
+    ports:
+      - "${UI_PORT:-5173}:5173"

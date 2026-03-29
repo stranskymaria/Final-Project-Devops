@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import App from '../../App';
+import appVersion from '../../../app-version.json';
 
 // Mock the note service
 vi.mock('../../services/noteService', () => ({
@@ -17,7 +18,9 @@ describe('App', () => {
 
   it('renders header', () => {
     render(<App />);
-    expect(screen.getByText('Gemini Notes')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Gemini Notes' })).toBeInTheDocument();
+    expect(screen.getByText(`UI v${appVersion.version}`)).toBeInTheDocument();
+    expect(screen.getByText('local')).toBeInTheDocument();
   });
 
   it('shows loading spinner initially', () => {

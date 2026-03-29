@@ -1,5 +1,12 @@
 import { Request, Response } from 'express';
+import fs from 'fs';
+import path from 'path';
 import pool from '../services/db';
+
+const appVersionPath = path.resolve(process.cwd(), '../app-version.json');
+const appVersion = JSON.parse(fs.readFileSync(appVersionPath, 'utf-8')).version;
+const buildSha = process.env.APP_BUILD_SHA?.trim() || null;
+const displayVersion = buildSha ? `${appVersion}+${buildSha}` : appVersion;
 
 export const getHealthStatus = async (req: Request, res: Response) => {
     const healthStatus = {
@@ -7,7 +14,8 @@ export const getHealthStatus = async (req: Request, res: Response) => {
         timestamp: new Date().toISOString(),
         uptime: Math.floor(process.uptime()),
         service: 'Notes API',
-        version: '1.0.0',
+        version: displayVersion,
+        buildSha,
         database: {
             status: 'unknown',
             responseTime: 0

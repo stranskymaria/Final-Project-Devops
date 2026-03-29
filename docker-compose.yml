@@ -4,10 +4,10 @@ services:
     container_name: simplenotes-mysql
     restart: unless-stopped
     environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpassword}
       MYSQL_DATABASE: ${MYSQL_DATABASE:-notes_db}
       MYSQL_USER: ${MYSQL_USER:-appuser}
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-apppassword}
     ports:
       - "3306:3306"
     volumes:
@@ -16,7 +16,8 @@ services:
 
   api:
     build:
-      context: ./SimpleNotesAPI
+      context: .
+      dockerfile: ./SimpleNotesAPI/Dockerfile
     container_name: simplenotes-api
     restart: unless-stopped
     depends_on:
@@ -25,6 +26,8 @@ services:
       - ${API_ENV_FILE:-./SimpleNotesAPI/.env}
     environment:
       PORT: ${API_PORT:-3001}
+      APP_BUILD_SHA: ${APP_BUILD_SHA:-}
+      APP_DEPLOY_COLOR: ${APP_DEPLOY_COLOR:-}
       DB_HOST: mysql
       DB_PORT: 3306
       TEST_DB_HOST: mysql
@@ -34,12 +37,15 @@ services:
 
   ui:
     build:
-      context: ./SimpleNotesUI
+      context: .
+      dockerfile: ./SimpleNotesUI/Dockerfile
     container_name: simplenotes-ui
     restart: unless-stopped
     depends_on:
       - api
     environment:
+      APP_BUILD_SHA: ${APP_BUILD_SHA:-}
+      APP_DEPLOY_COLOR: ${APP_DEPLOY_COLOR:-}
       VITE_API_URL: ${VITE_API_URL:-http://localhost:3001}
     ports:
       - "${UI_PORT:-5173}:5173"

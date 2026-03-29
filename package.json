@@ -1,0 +1,9 @@
+{
+  "name": "simplenotes-monorepo",
+  "private": true,
+  "scripts": {
+    "release:version": "node ./scripts/bump-version.mjs",
+    "sync:version": "node ./scripts/sync-version.mjs",
+    "staging:up": "node ./scripts/staging-compose.mjs up --build -d"
+  }
+}

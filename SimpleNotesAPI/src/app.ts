@@ -4,7 +4,7 @@ import cors from 'cors';
 import notesRouter from './routes/notes';
 import healthRouter from './routes/health';
 import swaggerUi from 'swagger-ui-express';
-const swaggerSpec = require('./docs/swaggerDef.js');
+import swaggerSpec from './docs/swaggerDef';
 
 const app = express();
 

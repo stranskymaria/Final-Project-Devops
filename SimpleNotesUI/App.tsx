@@ -8,6 +8,15 @@ import Modal from './components/Modal';
 import NoteForm from './components/NoteForm';
 import Spinner from './components/Spinner';
 
+const appDisplayVersion = __APP_DISPLAY_VERSION__;
+const deployColor = __APP_DEPLOY_COLOR__;
+
+const deployBadgeStyles: Record<string, string> = {
+  staging: 'border-amber-200 bg-amber-100 text-amber-800',
+  blue: 'border-blue-200 bg-blue-100 text-blue-800',
+  green: 'border-green-200 bg-green-100 text-green-800',
+};
+
 const App: React.FC = () => {
   const [notes, setNotes] = useState<Note[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
@@ -77,10 +86,16 @@ const App: React.FC = () => {
     setEditingNote(null);
   };
 
+  const hasDeployColor = deployColor === 'staging' || deployColor === 'blue' || deployColor === 'green';
+  const deployBadgeClassName = hasDeployColor
+    ? deployBadgeStyles[deployColor]
+    : 'border-slate-200 bg-slate-100 text-slate-600';
+  const deployLabel = hasDeployColor ? deployColor : 'local';
+
   return (
-    <div className="min-h-screen font-sans text-on-surface">
+    <div className="min-h-screen font-sans text-on-surface flex flex-col">
       <Header onCreateNote={handleCreateNote} />
-      <main className="container mx-auto px-4 py-8">
+      <main className="container mx-auto px-4 py-8 flex-1">
         {isLoading ? (
           <div className="flex justify-center items-center h-64">
             <Spinner />
@@ -101,6 +116,17 @@ const App: React.FC = () => {
           initialData={editingNote}
         />
       </Modal>
+      <footer className="border-t border-slate-200 bg-slate-50/90 backdrop-blur-sm">
+        <div className="container mx-auto px-4 py-4 text-center text-sm text-slate-500">
+          <span className="font-medium text-slate-700">Gemini Notes</span>
+          <span className="mx-2 text-slate-300">|</span>
+          <span>UI v{appDisplayVersion}</span>
+          <span className="mx-2 text-slate-300">|</span>
+          <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-semibold uppercase tracking-wide ${deployBadgeClassName}`}>
+            {deployLabel}
+          </span>
+        </div>
+      </footer>
     </div>
   );
 };
