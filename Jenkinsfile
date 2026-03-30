@@ -1,3 +1,7 @@
+def isCiPullRequest() {
+  return env.CHANGE_ID && (env.CHANGE_TARGET == 'main' || env.CHANGE_TARGET == 'release')
+}
+
 pipeline {
   agent any
 
@@ -20,7 +24,7 @@ pipeline {
         script {
           def changeBranch = env.CHANGE_BRANCH ?: ''
           def changeTarget = env.CHANGE_TARGET ?: ''
-          def isValidPr = env.CHANGE_ID && (changeTarget == 'main' || changeTarget == 'release')
+          def isValidPr = isCiPullRequest()
 
           if (isValidPr) {
             echo "Running CI for PR #${env.CHANGE_ID} from ${changeBranch} to ${changeTarget}."
@@ -35,7 +39,7 @@ pipeline {
     stage('Install Dependencies') {
       when {
         expression {
-          return env.CHANGE_ID && (env.CHANGE_TARGET == 'main' || env.CHANGE_TARGET == 'release')
+          return isCiPullRequest()
         }
       }
       parallel {
@@ -60,7 +64,7 @@ pipeline {
     stage('Quality Checks') {
       when {
         expression {
-          return env.CHANGE_ID && (env.CHANGE_TARGET == 'main' || env.CHANGE_TARGET == 'release')
+          return isCiPullRequest()
         }
       }
       parallel {
