@@ -51,7 +51,7 @@ pipeline {
       }
       steps {
         dir('SimpleNotesUI') {
-          sh 'npm ci'
+          sh 'npm ci --legacy-peer-deps'
         }
       }
     }
