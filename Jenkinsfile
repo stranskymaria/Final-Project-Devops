@@ -177,7 +177,7 @@ pipeline {
         }
 
         stage('Build and Push In Parallel') {
-          stages {
+          parallel {
             stage('Build and Push Backend') {
               steps {
                 sh """
