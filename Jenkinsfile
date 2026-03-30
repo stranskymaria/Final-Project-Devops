@@ -236,7 +236,19 @@ pipeline {
       }
       steps {
         sh '''
-          curl -fsS "http://192.168.2.6:3001/api/health"
+          for attempt in $(seq 1 12); do
+            if curl -fsS "http://192.168.2.6:3001/api/health"; then
+              break
+            fi
+
+            if [ "$attempt" -eq 12 ]; then
+              echo "Backend health endpoint did not become ready in time." >&2
+              exit 1
+            fi
+
+            sleep 5
+          done
+
           curl -fsS "http://192.168.2.6:3001/api/notes"
           curl -fsSI "http://192.168.2.6:5173"
         '''
