@@ -10,6 +10,15 @@ def getGithubRepoSlug() {
   return matcher ? matcher[0][1] : ''
 }
 
+def isMergePullRequestBuild() {
+  def jobName = env.JOB_NAME ?: ''
+  return isCiPullRequest() && jobName.contains('-merge')
+}
+
+def isStagingBranchBuild() {
+  return !env.CHANGE_ID && (env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'release')
+}
+
 pipeline {
   agent any
 
@@ -18,6 +27,22 @@ pipeline {
     disableConcurrentBuilds()
     timeout(time: 20, unit: 'MINUTES')
     buildDiscarder(logRotator(numToKeepStr: '20'))
+  }
+
+  environment {
+    REGISTRY = 'ghcr.io'
+    IMAGE_NAMESPACE = 'ghcr.io/stranskymaria'
+    API_IMAGE_NAME = 'simplenotes-api'
+    UI_IMAGE_NAME = 'simplenotes-ui'
+    STAGING_HOST = '192.168.2.6'
+    STAGING_PATH = '/home/ubuntu/simplenotes-staging'
+    STAGING_DB_HOST = '192.168.2.7'
+    STAGING_DB_USER = 'appuser'
+    STAGING_DB_NAME = 'notes_db'
+    STAGING_TEST_DB_NAME = 'notes_db_test'
+    STAGING_API_PORT = '3001'
+    STAGING_UI_PORT = '5173'
+    STAGING_VITE_API_URL = 'http://192.168.2.6:3001/api'
   }
 
   stages {
@@ -33,12 +58,15 @@ pipeline {
           def changeBranch = env.CHANGE_BRANCH ?: ''
           def changeTarget = env.CHANGE_TARGET ?: ''
           def isValidPr = isCiPullRequest()
+          def isStagingBuild = isStagingBranchBuild()
 
           if (isValidPr) {
             echo "Running CI for PR #${env.CHANGE_ID} from ${changeBranch} to ${changeTarget}."
+          } else if (isStagingBuild) {
+            echo "Running staging deployment flow for branch ${env.BRANCH_NAME}."
           } else {
-            currentBuild.description = 'Not a PR to main/release'
-            echo 'Skipping Pipeline 1 checks because this build is not a PR targeting main or release.'
+            currentBuild.description = 'Not a PR to main/release or a staging branch build'
+            echo 'Skipping CI/CD stages because this build is neither a PR to main/release nor a direct build on main/release.'
           }
         }
       }
@@ -110,12 +138,104 @@ pipeline {
         }
       }
     }
+
+    stage('Prepare Staging Metadata') {
+      when {
+        expression {
+          return isStagingBranchBuild()
+        }
+      }
+      steps {
+        script {
+          env.APP_BUILD_SHA = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
+          env.API_IMAGE = "${env.IMAGE_NAMESPACE}/${env.API_IMAGE_NAME}:${env.APP_BUILD_SHA}"
+          env.UI_IMAGE = "${env.IMAGE_NAMESPACE}/${env.UI_IMAGE_NAME}:${env.APP_BUILD_SHA}"
+          echo "Prepared staging image tags ${env.API_IMAGE} and ${env.UI_IMAGE}."
+        }
+      }
+    }
+
+    stage('Build and Push Images') {
+      when {
+        expression {
+          return isStagingBranchBuild()
+        }
+      }
+      steps {
+        withCredentials([usernamePassword(
+          credentialsId: 'github-creds',
+          usernameVariable: 'GITHUB_USERNAME',
+          passwordVariable: 'GITHUB_TOKEN',
+        )]) {
+          sh '''
+            echo "$GITHUB_TOKEN" | docker login "$REGISTRY" -u "$GITHUB_USERNAME" --password-stdin
+          '''
+          parallel(
+            "Build and Push Backend": {
+              sh """
+                docker build -t "${API_IMAGE}" -f SimpleNotesAPI/Dockerfile .
+                docker push "${API_IMAGE}"
+              """
+            },
+            "Build and Push Frontend": {
+              sh """
+                docker build -t "${UI_IMAGE}" -f SimpleNotesUI/Dockerfile .
+                docker push "${UI_IMAGE}"
+              """
+            }
+          )
+        }
+      }
+    }
+
+    stage('Deploy to Staging') {
+      when {
+        expression {
+          return isStagingBranchBuild()
+        }
+      }
+      steps {
+        withCredentials([
+          usernamePassword(
+            credentialsId: 'github-creds',
+            usernameVariable: 'GITHUB_USERNAME',
+            passwordVariable: 'GITHUB_TOKEN',
+          ),
+          sshUserPrivateKey(
+            credentialsId: 'staging-ssh',
+            keyFileVariable: 'SSH_KEY_FILE',
+            usernameVariable: 'STAGING_SSH_USER',
+          ),
+          string(
+            credentialsId: 'staging-db-password',
+            variable: 'STAGING_DB_PASSWORD',
+          ),
+        ]) {
+          sh 'bash scripts/deploy-staging.sh'
+        }
+      }
+    }
+
+    stage('Staging Smoke Tests') {
+      when {
+        expression {
+          return isStagingBranchBuild()
+        }
+      }
+      steps {
+        sh '''
+          curl -fsS "http://192.168.2.6:3001/api/health"
+          curl -fsS "http://192.168.2.6:3001/api/notes"
+          curl -fsSI "http://192.168.2.6:5173"
+        '''
+      }
+    }
   }
 
   post {
     failure {
       script {
-        if (isCiPullRequest()) {
+        if (isMergePullRequestBuild()) {
           def repoSlug = getGithubRepoSlug()
 
           if (!repoSlug) {
@@ -152,6 +272,8 @@ Please review the Jenkins build log and fix the failing stage before merging."""
                 --data @pr-comment.json
             """
           }
+        } else if (isCiPullRequest()) {
+          echo 'Skipping PR failure comment for the head build; the merge build is responsible for posting the PR comment.'
         }
       }
     }
