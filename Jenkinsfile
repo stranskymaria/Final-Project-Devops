@@ -6,10 +6,6 @@ pipeline {
     disableConcurrentBuilds()
   }
 
-  environment {
-    IS_PR_TO_MAIN_OR_RELEASE = 'false'
-  }
-
   stages {
     stage('Checkout') {
       steps {
@@ -25,7 +21,6 @@ pipeline {
           def isValidPr = env.CHANGE_ID && (changeTarget == 'main' || changeTarget == 'release')
 
           if (isValidPr) {
-            env.IS_PR_TO_MAIN_OR_RELEASE = 'true'
             echo "Running CI for PR #${env.CHANGE_ID} from ${changeBranch} to ${changeTarget}."
           } else {
             currentBuild.description = 'Not a PR to main/release'
@@ -37,7 +32,9 @@ pipeline {
 
     stage('Install Backend Dependencies') {
       when {
-        environment name: 'IS_PR_TO_MAIN_OR_RELEASE', value: 'true'
+        expression {
+          return env.CHANGE_ID && (env.CHANGE_TARGET == 'main' || env.CHANGE_TARGET == 'release')
+        }
       }
       steps {
         dir('SimpleNotesAPI') {
@@ -48,7 +45,9 @@ pipeline {
 
     stage('Install Frontend Dependencies') {
       when {
-        environment name: 'IS_PR_TO_MAIN_OR_RELEASE', value: 'true'
+        expression {
+          return env.CHANGE_ID && (env.CHANGE_TARGET == 'main' || env.CHANGE_TARGET == 'release')
+        }
       }
       steps {
         dir('SimpleNotesUI') {
@@ -59,7 +58,9 @@ pipeline {
 
     stage('Quality Checks') {
       when {
-        environment name: 'IS_PR_TO_MAIN_OR_RELEASE', value: 'true'
+        expression {
+          return env.CHANGE_ID && (env.CHANGE_TARGET == 'main' || env.CHANGE_TARGET == 'release')
+        }
       }
       parallel {
         stage('Backend Lint') {
