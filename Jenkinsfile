@@ -25,7 +25,7 @@ pipeline {
   options {
     timestamps()
     disableConcurrentBuilds()
-    timeout(time: 20, unit: 'MINUTES')
+    timeout(time: 40, unit: 'MINUTES')
     buildDiscarder(logRotator(numToKeepStr: '20'))
   }
 
@@ -177,7 +177,7 @@ pipeline {
         }
 
         stage('Build and Push In Parallel') {
-          parallel {
+          stages {
             stage('Build and Push Backend') {
               steps {
                 sh """
