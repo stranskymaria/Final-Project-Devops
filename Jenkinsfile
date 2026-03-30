@@ -35,48 +35,63 @@ pipeline {
       }
     }
 
-    stage('Backend Lint') {
+    stage('Install Backend Dependencies') {
       when {
         environment name: 'IS_PR_TO_MAIN_OR_RELEASE', value: 'true'
       }
       steps {
         dir('SimpleNotesAPI') {
           sh 'npm ci'
-          sh 'npm run lint'
         }
       }
     }
 
-    stage('Backend Tests') {
-      when {
-        environment name: 'IS_PR_TO_MAIN_OR_RELEASE', value: 'true'
-      }
-      steps {
-        dir('SimpleNotesAPI') {
-          sh 'npm run test:unit'
-        }
-      }
-    }
-
-    stage('Frontend Lint') {
+    stage('Install Frontend Dependencies') {
       when {
         environment name: 'IS_PR_TO_MAIN_OR_RELEASE', value: 'true'
       }
       steps {
         dir('SimpleNotesUI') {
           sh 'npm ci'
-          sh 'npm run lint'
         }
       }
     }
 
-    stage('Frontend Tests') {
+    stage('Quality Checks') {
       when {
         environment name: 'IS_PR_TO_MAIN_OR_RELEASE', value: 'true'
       }
-      steps {
-        dir('SimpleNotesUI') {
-          sh 'npm test -- --run'
+      parallel {
+        stage('Backend Lint') {
+          steps {
+            dir('SimpleNotesAPI') {
+              sh 'npm run lint'
+            }
+          }
+        }
+
+        stage('Backend Tests') {
+          steps {
+            dir('SimpleNotesAPI') {
+              sh 'npm run test:unit'
+            }
+          }
+        }
+
+        stage('Frontend Lint') {
+          steps {
+            dir('SimpleNotesUI') {
+              sh 'npm run lint'
+            }
+          }
+        }
+
+        stage('Frontend Tests') {
+          steps {
+            dir('SimpleNotesUI') {
+              sh 'npm test -- --run'
+            }
+          }
         }
       }
     }
