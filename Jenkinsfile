@@ -161,29 +161,41 @@ pipeline {
           return isStagingBranchBuild()
         }
       }
-      steps {
-        withCredentials([usernamePassword(
-          credentialsId: 'github-creds',
-          usernameVariable: 'GITHUB_USERNAME',
-          passwordVariable: 'GITHUB_TOKEN',
-        )]) {
-          sh '''
-            echo "$GITHUB_TOKEN" | docker login "$REGISTRY" -u "$GITHUB_USERNAME" --password-stdin
-          '''
-          parallel(
-            "Build and Push Backend": {
-              sh """
-                docker build -t "${API_IMAGE}" -f SimpleNotesAPI/Dockerfile .
-                docker push "${API_IMAGE}"
-              """
-            },
-            "Build and Push Frontend": {
-              sh """
-                docker build -t "${UI_IMAGE}" -f SimpleNotesUI/Dockerfile .
-                docker push "${UI_IMAGE}"
-              """
+      stages {
+        stage('Registry Login') {
+          steps {
+            withCredentials([usernamePassword(
+              credentialsId: 'github-creds',
+              usernameVariable: 'GITHUB_USERNAME',
+              passwordVariable: 'GITHUB_TOKEN',
+            )]) {
+              sh '''
+                echo "$GITHUB_TOKEN" | docker login "$REGISTRY" -u "$GITHUB_USERNAME" --password-stdin
+              '''
             }
-          )
+          }
+        }
+
+        stage('Build and Push In Parallel') {
+          parallel {
+            stage('Build and Push Backend') {
+              steps {
+                sh """
+                  docker build -t "${API_IMAGE}" -f SimpleNotesAPI/Dockerfile .
+                  docker push "${API_IMAGE}"
+                """
+              }
+            }
+
+            stage('Build and Push Frontend') {
+              steps {
+                sh """
+                  docker build -t "${UI_IMAGE}" -f SimpleNotesUI/Dockerfile .
+                  docker push "${UI_IMAGE}"
+                """
+              }
+            }
+          }
         }
       }
     }
