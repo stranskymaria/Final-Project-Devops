@@ -6,10 +6,6 @@ pipeline {
     disableConcurrentBuilds()
   }
 
-  environment {
-    IS_PR_TO_MAIN_OR_RELEASE = 'false'
-  }
-
   stages {
     stage('Checkout') {
       steps {
@@ -22,61 +18,81 @@ pipeline {
         script {
           def changeBranch = env.CHANGE_BRANCH ?: ''
           def changeTarget = env.CHANGE_TARGET ?: ''
-          def isValidPr = env.CHANGE_ID && changeBranch == 'development' && (changeTarget == 'main' || changeTarget == 'release')
+          def isValidPr = env.CHANGE_ID && (changeTarget == 'main' || changeTarget == 'release')
 
           if (isValidPr) {
-            env.IS_PR_TO_MAIN_OR_RELEASE = 'true'
             echo "Running CI for PR #${env.CHANGE_ID} from ${changeBranch} to ${changeTarget}."
           } else {
-            currentBuild.description = 'Not a PR from development to main/release'
-            echo 'Skipping Pipeline 1 checks because this build is not a PR from development to main or release.'
+            currentBuild.description = 'Not a PR to main/release'
+            echo 'Skipping Pipeline 1 checks because this build is not a PR targeting main or release.'
           }
         }
       }
     }
 
-    stage('Backend Lint') {
+    stage('Install Backend Dependencies') {
       when {
-        environment name: 'IS_PR_TO_MAIN_OR_RELEASE', value: 'true'
+        expression {
+          return env.CHANGE_ID && (env.CHANGE_TARGET == 'main' || env.CHANGE_TARGET == 'release')
+        }
       }
       steps {
         dir('SimpleNotesAPI') {
           sh 'npm ci'
-          sh 'npm run lint'
         }
       }
     }
 
-    stage('Backend Tests') {
+    stage('Install Frontend Dependencies') {
       when {
-        environment name: 'IS_PR_TO_MAIN_OR_RELEASE', value: 'true'
-      }
-      steps {
-        dir('SimpleNotesAPI') {
-          sh 'npm run test:unit'
+        expression {
+          return env.CHANGE_ID && (env.CHANGE_TARGET == 'main' || env.CHANGE_TARGET == 'release')
         }
-      }
-    }
-
-    stage('Frontend Lint') {
-      when {
-        environment name: 'IS_PR_TO_MAIN_OR_RELEASE', value: 'true'
       }
       steps {
         dir('SimpleNotesUI') {
           sh 'npm ci'
-          sh 'npm run lint'
         }
       }
     }
 
-    stage('Frontend Tests') {
+    stage('Quality Checks') {
       when {
-        environment name: 'IS_PR_TO_MAIN_OR_RELEASE', value: 'true'
+        expression {
+          return env.CHANGE_ID && (env.CHANGE_TARGET == 'main' || env.CHANGE_TARGET == 'release')
+        }
       }
-      steps {
-        dir('SimpleNotesUI') {
-          sh 'npm test -- --run'
+      parallel {
+        stage('Backend Lint') {
+          steps {
+            dir('SimpleNotesAPI') {
+              sh 'npm run lint'
+            }
+          }
+        }
+
+        stage('Backend Tests') {
+          steps {
+            dir('SimpleNotesAPI') {
+              sh 'npm run test:unit'
+            }
+          }
+        }
+
+        stage('Frontend Lint') {
+          steps {
+            dir('SimpleNotesUI') {
+              sh 'npm run lint'
+            }
+          }
+        }
+
+        stage('Frontend Tests') {
+          steps {
+            dir('SimpleNotesUI') {
+              sh 'npm test -- --run'
+            }
+          }
         }
       }
     }
