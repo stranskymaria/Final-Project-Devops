@@ -10,6 +10,11 @@ def getGithubRepoSlug() {
   return matcher ? matcher[0][1] : ''
 }
 
+def isMergePullRequestBuild() {
+  def jobName = env.JOB_NAME ?: ''
+  return isCiPullRequest() && jobName.contains('-merge')
+}
+
 pipeline {
   agent any
 
@@ -115,7 +120,7 @@ pipeline {
   post {
     failure {
       script {
-        if (isCiPullRequest()) {
+        if (isMergePullRequestBuild()) {
           def repoSlug = getGithubRepoSlug()
 
           if (!repoSlug) {
@@ -152,6 +157,8 @@ Please review the Jenkins build log and fix the failing stage before merging."""
                 --data @pr-comment.json
             """
           }
+        } else if (isCiPullRequest()) {
+          echo 'Skipping PR failure comment for the head build; the merge build is responsible for posting the PR comment.'
         }
       }
     }
