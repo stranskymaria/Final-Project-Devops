@@ -4,7 +4,7 @@ These files are templates for the database virtual machines.
 
 They are not meant to be run yet if the DB VMs are not configured.
 
-Use them later when you reach the database setup phase for:
+Use them later when reaching the database setup phase for:
 
 - `staging-db`
 - `db`
