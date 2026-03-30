@@ -56,3 +56,4 @@ These templates assume:
 - production app connects to `db`
 
 You will later replace the placeholder hostnames or IPs with real values.
+
