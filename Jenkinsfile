@@ -1,5 +1,13 @@
+import groovy.json.JsonOutput
+
 def isCiPullRequest() {
   return env.CHANGE_ID && (env.CHANGE_TARGET == 'main' || env.CHANGE_TARGET == 'release')
+}
+
+def getGithubRepoSlug() {
+  def changeUrl = env.CHANGE_URL ?: ''
+  def matcher = (changeUrl =~ /github\.com\/([^\/]+\/[^\/]+)\/pull\/\d+/)
+  return matcher ? matcher[0][1] : ''
 }
 
 pipeline {
@@ -105,6 +113,49 @@ pipeline {
   }
 
   post {
+    failure {
+      script {
+        if (isCiPullRequest()) {
+          def repoSlug = getGithubRepoSlug()
+
+          if (!repoSlug) {
+            echo 'Skipping PR failure comment because the GitHub repository slug could not be determined from CHANGE_URL.'
+            return
+          }
+
+          def prComment = """CI checks failed for this pull request.
+
+- Build: ${env.BUILD_URL}
+- PR: #${env.CHANGE_ID}
+- Source branch: ${env.CHANGE_BRANCH}
+- Target branch: ${env.CHANGE_TARGET}
+
+Please review the Jenkins build log and fix the failing stage before merging."""
+
+          writeFile(
+            file: 'pr-comment.json',
+            text: JsonOutput.toJson([body: prComment]),
+          )
+
+          withCredentials([usernamePassword(
+            credentialsId: 'github-creds',
+            usernameVariable: 'GITHUB_USERNAME',
+            passwordVariable: 'GITHUB_TOKEN',
+          )]) {
+            sh """
+              curl -sS \
+                -u "$GITHUB_USERNAME:$GITHUB_TOKEN" \
+                -H "Accept: application/vnd.github+json" \
+                -H "X-GitHub-Api-Version: 2022-11-28" \
+                -X POST \
+                "https://api.github.com/repos/${repoSlug}/issues/${env.CHANGE_ID}/comments" \
+                --data @pr-comment.json
+            """
+          }
+        }
+      }
+    }
+
     always {
       echo "Build finished with status: ${currentBuild.currentResult}"
     }
