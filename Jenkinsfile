@@ -67,9 +67,8 @@ pipeline {
           return isCiPullRequest()
         }
       }
+      failFast true
       parallel {
-        failFast true
-
         stage('Backend Lint') {
           steps {
             dir('SimpleNotesAPI') {
