@@ -1,0 +1,173 @@
+def isStagingBranchBuild() {
+  return env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'release'
+}
+
+pipeline {
+  agent any
+
+  options {
+    timestamps()
+    disableConcurrentBuilds()
+    timeout(time: 40, unit: 'MINUTES')
+    buildDiscarder(logRotator(numToKeepStr: '20'))
+  }
+
+  environment {
+    REGISTRY = 'ghcr.io'
+    IMAGE_NAMESPACE = 'ghcr.io/stranskymaria'
+    API_IMAGE_NAME = 'simplenotes-api'
+    UI_IMAGE_NAME = 'simplenotes-ui'
+    STAGING_HOST = '192.168.2.6'
+    STAGING_PATH = '/home/ubuntu/simplenotes-staging'
+    STAGING_DB_HOST = '192.168.2.7'
+    STAGING_DB_USER = 'appuser'
+    STAGING_DB_NAME = 'notes_db'
+    STAGING_TEST_DB_NAME = 'notes_db_test'
+    STAGING_API_PORT = '3001'
+    STAGING_UI_PORT = '5173'
+    STAGING_VITE_API_URL = 'http://192.168.2.6:3001/api'
+  }
+
+  stages {
+    stage('Checkout') {
+      steps {
+        checkout scm
+      }
+    }
+
+    stage('Validate Trigger') {
+      steps {
+        script {
+          if (isStagingBranchBuild()) {
+            echo "Running staging deployment flow for branch ${env.BRANCH_NAME}."
+          } else {
+            currentBuild.description = 'Not a main/release branch build'
+            echo 'Skipping staging pipeline because this build is not running on main or release.'
+          }
+        }
+      }
+    }
+
+    stage('Prepare Staging Metadata') {
+      when {
+        expression {
+          return isStagingBranchBuild()
+        }
+      }
+      steps {
+        script {
+          env.APP_BUILD_SHA = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
+          env.API_IMAGE = "${env.IMAGE_NAMESPACE}/${env.API_IMAGE_NAME}:${env.APP_BUILD_SHA}"
+          env.UI_IMAGE = "${env.IMAGE_NAMESPACE}/${env.UI_IMAGE_NAME}:${env.APP_BUILD_SHA}"
+          echo "Prepared staging image tags ${env.API_IMAGE} and ${env.UI_IMAGE}."
+        }
+      }
+    }
+
+    stage('Build and Push Images') {
+      when {
+        expression {
+          return isStagingBranchBuild()
+        }
+      }
+      stages {
+        stage('Registry Login') {
+          steps {
+            withCredentials([usernamePassword(
+              credentialsId: 'github-creds',
+              usernameVariable: 'GITHUB_USERNAME',
+              passwordVariable: 'GITHUB_TOKEN',
+            )]) {
+              sh '''
+                echo "$GITHUB_TOKEN" | docker login "$REGISTRY" -u "$GITHUB_USERNAME" --password-stdin
+              '''
+            }
+          }
+        }
+
+        stage('Build and Push Images In Parallel') {
+          parallel {
+            stage('Build and Push Backend') {
+              steps {
+                sh """
+                  docker build -t "${API_IMAGE}" -f SimpleNotesAPI/Dockerfile .
+                  docker push "${API_IMAGE}"
+                """
+              }
+            }
+
+            stage('Build and Push Frontend') {
+              steps {
+                sh """
+                  docker build -t "${UI_IMAGE}" -f SimpleNotesUI/Dockerfile .
+                  docker push "${UI_IMAGE}"
+                """
+              }
+            }
+          }
+        }
+      }
+    }
+
+    stage('Deploy to Staging') {
+      when {
+        expression {
+          return isStagingBranchBuild()
+        }
+      }
+      steps {
+        withCredentials([
+          usernamePassword(
+            credentialsId: 'github-creds',
+            usernameVariable: 'GITHUB_USERNAME',
+            passwordVariable: 'GITHUB_TOKEN',
+          ),
+          sshUserPrivateKey(
+            credentialsId: 'staging-ssh',
+            keyFileVariable: 'SSH_KEY_FILE',
+            usernameVariable: 'STAGING_SSH_USER',
+          ),
+          string(
+            credentialsId: 'staging-db-password',
+            variable: 'STAGING_DB_PASSWORD',
+          ),
+        ]) {
+          sh 'bash scripts/deploy-staging.sh'
+        }
+      }
+    }
+
+    stage('Staging Smoke Tests') {
+      when {
+        expression {
+          return isStagingBranchBuild()
+        }
+      }
+      steps {
+        sh '''
+          for attempt in $(seq 1 12); do
+            if curl -fsS "http://192.168.2.6:3001/api/health"; then
+              break
+            fi
+
+            if [ "$attempt" -eq 12 ]; then
+              echo "Backend health endpoint did not become ready in time." >&2
+              exit 1
+            fi
+
+            sleep 5
+          done
+
+          curl -fsS "http://192.168.2.6:3001/api/notes"
+          curl -fsSI "http://192.168.2.6:5173"
+        '''
+      }
+    }
+  }
+
+  post {
+    always {
+      echo "Build finished with status: ${currentBuild.currentResult}"
+    }
+  }
+}
