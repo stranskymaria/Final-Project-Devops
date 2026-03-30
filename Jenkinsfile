@@ -1,9 +1,15 @@
+def isCiPullRequest() {
+  return env.CHANGE_ID && (env.CHANGE_TARGET == 'main' || env.CHANGE_TARGET == 'release')
+}
+
 pipeline {
   agent any
 
   options {
     timestamps()
     disableConcurrentBuilds()
+    timeout(time: 20, unit: 'MINUTES')
+    buildDiscarder(logRotator(numToKeepStr: '20'))
   }
 
   stages {
@@ -18,7 +24,7 @@ pipeline {
         script {
           def changeBranch = env.CHANGE_BRANCH ?: ''
           def changeTarget = env.CHANGE_TARGET ?: ''
-          def isValidPr = env.CHANGE_ID && (changeTarget == 'main' || changeTarget == 'release')
+          def isValidPr = isCiPullRequest()
 
           if (isValidPr) {
             echo "Running CI for PR #${env.CHANGE_ID} from ${changeBranch} to ${changeTarget}."
@@ -30,28 +36,27 @@ pipeline {
       }
     }
 
-    stage('Install Backend Dependencies') {
+    stage('Install Dependencies') {
       when {
         expression {
-          return env.CHANGE_ID && (env.CHANGE_TARGET == 'main' || env.CHANGE_TARGET == 'release')
+          return isCiPullRequest()
         }
       }
-      steps {
-        dir('SimpleNotesAPI') {
-          sh 'npm ci'
+      parallel {
+        stage('Install Backend Dependencies') {
+          steps {
+            dir('SimpleNotesAPI') {
+              sh 'npm ci'
+            }
+          }
         }
-      }
-    }
 
-    stage('Install Frontend Dependencies') {
-      when {
-        expression {
-          return env.CHANGE_ID && (env.CHANGE_TARGET == 'main' || env.CHANGE_TARGET == 'release')
-        }
-      }
-      steps {
-        dir('SimpleNotesUI') {
-          sh 'npm ci'
+        stage('Install Frontend Dependencies') {
+          steps {
+            dir('SimpleNotesUI') {
+              sh 'npm ci --legacy-peer-deps'
+            }
+          }
         }
       }
     }
@@ -59,9 +64,10 @@ pipeline {
     stage('Quality Checks') {
       when {
         expression {
-          return env.CHANGE_ID && (env.CHANGE_TARGET == 'main' || env.CHANGE_TARGET == 'release')
+          return isCiPullRequest()
         }
       }
+      failFast true
       parallel {
         stage('Backend Lint') {
           steps {
