@@ -6,6 +6,8 @@ import healthRouter from './routes/health';
 import swaggerUi from 'swagger-ui-express';
 import swaggerSpec from './docs/swaggerDef';
 
+//const unusedBackendLintValue = 123;
+
 const app = express();
 
 // Middleware
