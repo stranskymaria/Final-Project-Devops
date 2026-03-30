@@ -22,14 +22,14 @@ pipeline {
         script {
           def changeBranch = env.CHANGE_BRANCH ?: ''
           def changeTarget = env.CHANGE_TARGET ?: ''
-          def isValidPr = env.CHANGE_ID && changeBranch == 'development' && (changeTarget == 'main' || changeTarget == 'release')
+          def isValidPr = env.CHANGE_ID && (changeTarget == 'main' || changeTarget == 'release')
 
           if (isValidPr) {
             env.IS_PR_TO_MAIN_OR_RELEASE = 'true'
             echo "Running CI for PR #${env.CHANGE_ID} from ${changeBranch} to ${changeTarget}."
           } else {
-            currentBuild.description = 'Not a PR from development to main/release'
-            echo 'Skipping Pipeline 1 checks because this build is not a PR from development to main or release.'
+            currentBuild.description = 'Not a PR to main/release'
+            echo 'Skipping Pipeline 1 checks because this build is not a PR targeting main or release.'
           }
         }
       }
