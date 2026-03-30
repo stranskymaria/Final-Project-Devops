@@ -1,0 +1,79 @@
+pipeline {
+  agent any
+
+  options {
+    timestamps()
+    disableConcurrentBuilds()
+    timeout(time: 60, unit: 'MINUTES')
+    buildDiscarder(logRotator(numToKeepStr: '20'))
+  }
+
+  parameters {
+    choice(
+      name: 'TARGET_SLOT',
+      choices: ['auto', 'blue', 'green'],
+      description: 'Choose the production slot to deploy, or use auto to let the pipeline decide.'
+    )
+    string(
+      name: 'IMAGE_TAG',
+      defaultValue: '',
+      description: 'Docker image tag to deploy. Leave empty to use the latest approved staging build.'
+    )
+  }
+
+  stages {
+    stage('Checkout') {
+      steps {
+        checkout scm
+      }
+    }
+
+    stage('Validate Manual Trigger') {
+      steps {
+        echo 'Production pipeline scaffold ready. This pipeline should be triggered manually from Jenkins.'
+      }
+    }
+
+    stage('Detect Live Slot') {
+      steps {
+        echo 'TODO: detect whether blue or green is currently receiving traffic.'
+      }
+    }
+
+    stage('Select Idle Slot') {
+      steps {
+        echo "TODO: choose the idle slot based on TARGET_SLOT=${params.TARGET_SLOT}."
+      }
+    }
+
+    stage('Deploy Idle Slot') {
+      steps {
+        echo 'TODO: pull images and deploy the selected production slot.'
+      }
+    }
+
+    stage('Smoke Tests') {
+      steps {
+        echo 'TODO: run health and smoke tests against the idle production slot.'
+      }
+    }
+
+    stage('Switch Traffic') {
+      steps {
+        echo 'TODO: update Nginx upstream and switch traffic to the healthy slot.'
+      }
+    }
+
+    stage('Rollback Monitoring') {
+      steps {
+        echo 'TODO: monitor for 10 minutes and roll back if health checks fail.'
+      }
+    }
+  }
+
+  post {
+    always {
+      echo "Build finished with status: ${currentBuild.currentResult}"
+    }
+  }
+}
