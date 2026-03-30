@@ -30,28 +30,27 @@ pipeline {
       }
     }
 
-    stage('Install Backend Dependencies') {
+    stage('Install Dependencies') {
       when {
         expression {
           return env.CHANGE_ID && (env.CHANGE_TARGET == 'main' || env.CHANGE_TARGET == 'release')
         }
       }
-      steps {
-        dir('SimpleNotesAPI') {
-          sh 'npm ci'
+      parallel {
+        stage('Install Backend Dependencies') {
+          steps {
+            dir('SimpleNotesAPI') {
+              sh 'npm ci'
+            }
+          }
         }
-      }
-    }
 
-    stage('Install Frontend Dependencies') {
-      when {
-        expression {
-          return env.CHANGE_ID && (env.CHANGE_TARGET == 'main' || env.CHANGE_TARGET == 'release')
-        }
-      }
-      steps {
-        dir('SimpleNotesUI') {
-          sh 'npm ci --legacy-peer-deps'
+        stage('Install Frontend Dependencies') {
+          steps {
+            dir('SimpleNotesUI') {
+              sh 'npm ci --legacy-peer-deps'
+            }
+          }
         }
       }
     }
