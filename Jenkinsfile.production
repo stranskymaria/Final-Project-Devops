@@ -1,10 +1,9 @@
-def selectIdleSlot(requestedSlot) {
+def selectIdleSlot(requestedSlot, liveSlot) {
   if (requestedSlot == 'blue' || requestedSlot == 'green') {
     return requestedSlot
   }
 
-  def currentLiveSlot = 'blue'
-  return currentLiveSlot == 'blue' ? 'green' : 'blue'
+  return liveSlot == 'blue' ? 'green' : 'blue'
 }
 
 pipeline {
@@ -20,6 +19,7 @@ pipeline {
   environment {
     REGISTRY = 'ghcr.io'
     IMAGE_NAMESPACE = 'ghcr.io/stranskymaria'
+    GITHUB_REPOSITORY = 'stranskymaria/Final-Project-Devops'
     API_IMAGE_NAME = 'simplenotes-api'
     UI_IMAGE_NAME = 'simplenotes-ui'
     PROD_BLUE_HOST = '192.168.2.8'
@@ -61,38 +61,48 @@ pipeline {
       }
     }
 
-    stage('Detect Live Slot') {
+    stage('Detect Live Production Slot') {
       steps {
-        script {
-          env.LIVE_SLOT = 'blue'
-          echo "Assuming live production slot is ${env.LIVE_SLOT}. Replace this with real Nginx detection later."
+        withCredentials([sshUserPrivateKey(
+          credentialsId: 'production-ssh',
+          keyFileVariable: 'SSH_KEY_FILE',
+          usernameVariable: 'PROD_SSH_USER',
+        )]) {
+          script {
+            env.LIVE_SLOT = sh(script: 'bash scripts/detect-production-live-slot.sh', returnStdout: true).trim()
+            echo "Detected live production slot from Nginx: ${env.LIVE_SLOT}"
+          }
         }
       }
     }
 
-    stage('Select Idle Slot') {
+    stage('Select Deployment Slot') {
       steps {
         script {
-          env.TARGET_DEPLOY_SLOT = selectIdleSlot(params.TARGET_SLOT)
+          env.TARGET_DEPLOY_SLOT = selectIdleSlot(params.TARGET_SLOT, env.LIVE_SLOT)
           env.PROD_SLOT_HOST = env.TARGET_DEPLOY_SLOT == 'blue' ? env.PROD_BLUE_HOST : env.PROD_GREEN_HOST
           env.PROD_SLOT_PATH = env.TARGET_DEPLOY_SLOT == 'blue' ? env.PROD_BLUE_PATH : env.PROD_GREEN_PATH
-          echo "Selected idle slot ${env.TARGET_DEPLOY_SLOT} on host ${env.PROD_SLOT_HOST}."
+          echo "Live slot is ${env.LIVE_SLOT}; selected deployment slot ${env.TARGET_DEPLOY_SLOT} on host ${env.PROD_SLOT_HOST}."
         }
       }
     }
 
-    stage('Prepare Production Metadata') {
+    stage('Prepare Release Metadata') {
       steps {
         script {
           env.APP_BUILD_SHA = params.IMAGE_TAG?.trim() ? params.IMAGE_TAG.trim() : sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
+          env.GIT_COMMIT_SHA = sh(script: 'git rev-parse HEAD', returnStdout: true).trim()
           env.API_IMAGE = "${env.IMAGE_NAMESPACE}/${env.API_IMAGE_NAME}:${env.APP_BUILD_SHA}"
           env.UI_IMAGE = "${env.IMAGE_NAMESPACE}/${env.UI_IMAGE_NAME}:${env.APP_BUILD_SHA}"
+          env.ROLLBACK_EXECUTED = 'false'
+          currentBuild.displayName = "#${env.BUILD_NUMBER} ${env.APP_BUILD_SHA} -> ${env.TARGET_DEPLOY_SLOT}"
+          currentBuild.description = "live=${env.LIVE_SLOT}, target=${env.TARGET_DEPLOY_SLOT}, sha=${env.APP_BUILD_SHA}"
           echo "Prepared production image tags ${env.API_IMAGE} and ${env.UI_IMAGE}."
         }
       }
     }
 
-    stage('Deploy Idle Slot') {
+    stage('Deploy To Idle Slot') {
       steps {
         withCredentials([
           usernamePassword(
@@ -121,7 +131,7 @@ pipeline {
       }
     }
 
-    stage('Switch Traffic') {
+    stage('Switch Production Traffic') {
       steps {
         withCredentials([sshUserPrivateKey(
           credentialsId: 'production-ssh',
@@ -133,28 +143,88 @@ pipeline {
       }
     }
 
-    stage('Rollback Monitoring') {
+    stage('Post-Switch Monitoring') {
       steps {
         script {
-          echo "Monitoring slot ${env.TARGET_DEPLOY_SLOT} for 10 minutes before considering rollback logic complete."
-        }
-        sh '''
-          for attempt in $(seq 1 10); do
-            if ! curl -fsS "http://192.168.2.11/api/health" >/dev/null; then
-              echo "Production health check failed during monitoring window." >&2
-              exit 1
-            fi
+          echo "Monitoring slot ${env.TARGET_DEPLOY_SLOT} for 10 minutes after traffic switch."
+          try {
+            sh '''
+              for attempt in $(seq 1 10); do
+                if ! curl -fsS "http://192.168.2.11/api/health" >/dev/null; then
+                  echo "Production health check failed during monitoring window." >&2
+                  exit 1
+                fi
 
-            if [ "$attempt" -lt 10 ]; then
-              sleep 60
-            fi
-          done
-        '''
+                if [ "$attempt" -lt 10 ]; then
+                  sleep 60
+                fi
+              done
+            '''
+          } catch (Exception ex) {
+            env.ROLLBACK_EXECUTED = 'true'
+            withCredentials([sshUserPrivateKey(
+              credentialsId: 'production-ssh',
+              keyFileVariable: 'SSH_KEY_FILE',
+              usernameVariable: 'PROD_SSH_USER',
+            )]) {
+              withEnv(["TARGET_SLOT=${env.LIVE_SLOT}"]) {
+                sh 'bash scripts/switch-nginx-slot.sh'
+              }
+            }
+            currentBuild.description = "rolled back to ${env.LIVE_SLOT} after failed monitoring, attempted ${env.TARGET_DEPLOY_SLOT}, sha=${env.APP_BUILD_SHA}"
+            error("Production health check failed after switch. Traffic was rolled back to ${env.LIVE_SLOT}.")
+          }
+        }
+      }
+    }
+
+    stage('Deployment Summary') {
+      steps {
+        script {
+          def summary = "Production deploy succeeded. live=${env.TARGET_DEPLOY_SLOT}, previous=${env.LIVE_SLOT}, sha=${env.APP_BUILD_SHA}"
+          currentBuild.description = summary
+          echo summary
+        }
       }
     }
   }
 
   post {
+    success {
+      withCredentials([usernamePassword(
+        credentialsId: 'github-creds',
+        usernameVariable: 'GITHUB_USERNAME',
+        passwordVariable: 'GITHUB_TOKEN',
+      )]) {
+        withEnv([
+          "STATUS_STATE=success",
+          "STATUS_DESCRIPTION=Production deploy completed successfully on ${env.TARGET_DEPLOY_SLOT}",
+        ]) {
+          sh 'bash scripts/report-production-deployment-status.sh'
+        }
+      }
+    }
+
+    failure {
+      withCredentials([usernamePassword(
+        credentialsId: 'github-creds',
+        usernameVariable: 'GITHUB_USERNAME',
+        passwordVariable: 'GITHUB_TOKEN',
+      )]) {
+        script {
+          def description = env.ROLLBACK_EXECUTED == 'true'
+            ? "Production deploy failed; traffic rolled back to ${env.LIVE_SLOT}"
+            : "Production deploy failed; check Jenkins build log"
+          withEnv([
+            'STATUS_STATE=failure',
+            "STATUS_DESCRIPTION=${description}",
+          ]) {
+            sh 'bash scripts/report-production-deployment-status.sh'
+          }
+        }
+      }
+    }
+
     always {
       echo "Build finished with status: ${currentBuild.currentResult}"
     }
