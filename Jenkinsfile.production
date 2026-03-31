@@ -46,6 +46,11 @@ pipeline {
       defaultValue: '',
       description: 'Docker image tag to deploy. Leave empty to use the latest approved staging build.'
     )
+    string(
+      name: 'MONITOR_MINUTES',
+      defaultValue: '10',
+      description: 'Number of minutes to monitor production after switching traffic.'
+    )
   }
 
   stages {
@@ -146,16 +151,21 @@ pipeline {
     stage('Post-Switch Monitoring') {
       steps {
         script {
-          echo "Monitoring slot ${env.TARGET_DEPLOY_SLOT} for 10 minutes after traffic switch."
+          def monitorMinutes = params.MONITOR_MINUTES?.trim() ?: '10'
+          if (!monitorMinutes.isInteger() || monitorMinutes.toInteger() < 1) {
+            error("MONITOR_MINUTES must be a positive integer. Received: ${params.MONITOR_MINUTES}")
+          }
+          env.MONITOR_MINUTES_RESOLVED = monitorMinutes
+          echo "Monitoring slot ${env.TARGET_DEPLOY_SLOT} for ${env.MONITOR_MINUTES_RESOLVED} minute(s) after traffic switch."
           try {
             sh '''
-              for attempt in $(seq 1 10); do
+              for attempt in $(seq 1 "${MONITOR_MINUTES_RESOLVED}"); do
                 if ! curl -fsS "http://192.168.2.11/api/health" >/dev/null; then
                   echo "Production health check failed during monitoring window." >&2
                   exit 1
                 fi
 
-                if [ "$attempt" -lt 10 ]; then
+                if [ "$attempt" -lt "${MONITOR_MINUTES_RESOLVED}" ]; then
                   sleep 60
                 fi
               done
