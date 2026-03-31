@@ -1,0 +1,150 @@
+def parseEnvFile(path) {
+  def values = [:]
+  if (!fileExists(path)) {
+    return values
+  }
+
+  readFile(path)
+    .split('\n')
+    .findAll { it?.trim() }
+    .each { line ->
+      def idx = line.indexOf('=')
+      if (idx > 0) {
+        def key = line.substring(0, idx)
+        def value = line.substring(idx + 1)
+        values[key] = value
+      }
+    }
+
+  return values
+}
+
+pipeline {
+  agent any
+
+  options {
+    timestamps()
+    disableConcurrentBuilds()
+    timeout(time: 10, unit: 'MINUTES')
+    buildDiscarder(logRotator(numToKeepStr: '50'))
+  }
+
+  triggers {
+    cron('* * * * *')
+  }
+
+  environment {
+    PROD_PUBLIC_BASE_URL = 'http://192.168.2.11'
+    NGINX_HOST = '192.168.2.11'
+    PROD_BLUE_HOST = '192.168.2.8'
+    PROD_GREEN_HOST = '192.168.2.9'
+    PROD_BLUE_PATH = '/home/ubuntu/simplenotes-prod-blue'
+    PROD_GREEN_PATH = '/home/ubuntu/simplenotes-prod-green'
+    MONITOR_STATE_DIR = '.monitoring-state'
+  }
+
+  parameters {
+    string(
+      name: 'FAILURE_THRESHOLD',
+      defaultValue: '3',
+      description: 'Number of consecutive failed checks before auto-recovery is triggered.'
+    )
+  }
+
+  stages {
+    stage('Checkout') {
+      steps {
+        checkout scm
+      }
+    }
+
+    stage('Detect Live Production Slot') {
+      steps {
+        withCredentials([sshUserPrivateKey(
+          credentialsId: 'production-ssh',
+          keyFileVariable: 'SSH_KEY_FILE',
+          usernameVariable: 'PROD_SSH_USER',
+        )]) {
+          script {
+            env.LIVE_SLOT = sh(script: 'bash scripts/detect-production-live-slot.sh', returnStdout: true).trim()
+            echo "Detected live production slot: ${env.LIVE_SLOT}"
+          }
+        }
+      }
+    }
+
+    stage('Health Checks') {
+      steps {
+        script {
+          def threshold = params.FAILURE_THRESHOLD?.trim() ?: '3'
+          if (!threshold.isInteger() || threshold.toInteger() < 1) {
+            error("FAILURE_THRESHOLD must be a positive integer. Received: ${params.FAILURE_THRESHOLD}")
+          }
+          env.FAILURE_THRESHOLD_RESOLVED = threshold
+        }
+        sh 'bash scripts/evaluate-production-health.sh'
+        script {
+          def status = parseEnvFile("${env.MONITOR_STATE_DIR}/monitoring-status.env")
+          env.FRONTEND_STATUS = status.FRONTEND_STATUS ?: 'unknown'
+          env.BACKEND_STATUS = status.BACKEND_STATUS ?: 'unknown'
+          env.FRONTEND_FAIL_COUNT = status.FRONTEND_FAIL_COUNT ?: '0'
+          env.BACKEND_FAIL_COUNT = status.BACKEND_FAIL_COUNT ?: '0'
+          env.RECOVER_FRONTEND = status.RECOVER_FRONTEND ?: 'false'
+          env.RECOVER_BACKEND = status.RECOVER_BACKEND ?: 'false'
+          currentBuild.description = "live=${env.LIVE_SLOT}, ui=${env.FRONTEND_STATUS}/${env.FRONTEND_FAIL_COUNT}, api=${env.BACKEND_STATUS}/${env.BACKEND_FAIL_COUNT}"
+          echo "Frontend status: ${env.FRONTEND_STATUS} (${env.FRONTEND_FAIL_COUNT} consecutive failures)"
+          echo "Backend status: ${env.BACKEND_STATUS} (${env.BACKEND_FAIL_COUNT} consecutive failures)"
+        }
+      }
+    }
+
+    stage('Auto-Recovery') {
+      when {
+        expression {
+          return env.RECOVER_FRONTEND == 'true' || env.RECOVER_BACKEND == 'true'
+        }
+      }
+      steps {
+        withCredentials([sshUserPrivateKey(
+          credentialsId: 'production-ssh',
+          keyFileVariable: 'SSH_KEY_FILE',
+          usernameVariable: 'PROD_SSH_USER',
+        )]) {
+          script {
+            if (env.RECOVER_BACKEND == 'true') {
+              withEnv(['SERVICE_NAME=api']) {
+                sh 'bash scripts/recover-production-service.sh'
+              }
+              writeFile(file: "${env.MONITOR_STATE_DIR}/backend_fail_count", text: '0\n')
+            }
+
+            if (env.RECOVER_FRONTEND == 'true') {
+              withEnv(['SERVICE_NAME=ui']) {
+                sh 'bash scripts/recover-production-service.sh'
+              }
+              writeFile(file: "${env.MONITOR_STATE_DIR}/frontend_fail_count", text: '0\n')
+            }
+          }
+        }
+      }
+    }
+
+    stage('Monitoring Summary') {
+      steps {
+        script {
+          def summary = "Monitoring completed. live=${env.LIVE_SLOT}, ui=${env.FRONTEND_STATUS}/${env.FRONTEND_FAIL_COUNT}, api=${env.BACKEND_STATUS}/${env.BACKEND_FAIL_COUNT}"
+          if (env.RECOVER_FRONTEND == 'true' || env.RECOVER_BACKEND == 'true') {
+            summary += ', recovery-triggered=true'
+          }
+          echo summary
+        }
+      }
+    }
+  }
+
+  post {
+    always {
+      echo "Build finished with status: ${currentBuild.currentResult}"
+    }
+  }
+}
