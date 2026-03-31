@@ -1,5 +1,13 @@
+import groovy.json.JsonOutput
+
 def isStagingBranchBuild() {
   return env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'release'
+}
+
+def getGithubRepoSlug() {
+  def gitUrl = env.GIT_URL ?: ''
+  def matcher = (gitUrl =~ /[:\/]([^\/:]+\/[^\/]+?)(?:\.git)?$/)
+  return matcher ? matcher[0][1] : ''
 }
 
 pipeline {
@@ -85,7 +93,7 @@ pipeline {
           }
         }
 
-        stage('Build and Push Images In Parallel') {
+        stage('Build and Push Application Images') {
           parallel {
             stage('Build and Push Backend') {
               steps {
@@ -150,7 +158,57 @@ pipeline {
   }
 
   post {
+    failure {
+      script {
+        if (isStagingBranchBuild()) {
+          def repoSlug = getGithubRepoSlug()
+
+          if (!repoSlug) {
+            echo 'Skipping staging failure comment because the GitHub repository slug could not be determined from GIT_URL.'
+          } else {
+            def commitSha = sh(script: 'git rev-parse HEAD', returnStdout: true).trim()
+            def commitComment = """Staging deployment pipeline failed.
+
+- Build: ${env.BUILD_URL}
+- Branch: ${env.BRANCH_NAME}
+- Commit: ${commitSha}
+
+Please review the Jenkins staging pipeline log before promoting this version further."""
+
+            writeFile(
+              file: 'staging-comment.json',
+              text: JsonOutput.toJson([body: commitComment]),
+            )
+
+            withCredentials([usernamePassword(
+              credentialsId: 'github-creds',
+              usernameVariable: 'GITHUB_USERNAME',
+              passwordVariable: 'GITHUB_TOKEN',
+            )]) {
+              sh """
+                curl -sS \
+                  -u "$GITHUB_USERNAME:$GITHUB_TOKEN" \
+                  -H "Accept: application/vnd.github+json" \
+                  -H "X-GitHub-Api-Version: 2022-11-28" \
+                  -X POST \
+                  "https://api.github.com/repos/${repoSlug}/commits/${commitSha}/comments" \
+                  --data @staging-comment.json
+              """
+            }
+          }
+        }
+      }
+    }
+
     always {
+      script {
+        if (isStagingBranchBuild()) {
+          sh '''
+            docker image rm -f "${API_IMAGE}" "${UI_IMAGE}" 2>/dev/null || true
+            docker system prune -f >/dev/null 2>&1 || true
+          '''
+        }
+      }
       echo "Build finished with status: ${currentBuild.currentResult}"
     }
   }
