@@ -25,6 +25,7 @@ pipeline {
     PROD_BLUE_HOST = '192.168.2.8'
     PROD_GREEN_HOST = '192.168.2.9'
     PROD_DB_HOST = '192.168.2.10'
+    PROD_DB_BACKUP_PATH = '/home/ubuntu/simplenotes-db-backups'
     NGINX_HOST = '192.168.2.11'
     PROD_BLUE_PATH = '/home/ubuntu/simplenotes-prod-blue'
     PROD_GREEN_PATH = '/home/ubuntu/simplenotes-prod-green'
@@ -103,6 +104,27 @@ pipeline {
           currentBuild.displayName = "#${env.BUILD_NUMBER} ${env.APP_BUILD_SHA} -> ${env.TARGET_DEPLOY_SLOT}"
           currentBuild.description = "live=${env.LIVE_SLOT}, target=${env.TARGET_DEPLOY_SLOT}, sha=${env.APP_BUILD_SHA}"
           echo "Prepared production image tags ${env.API_IMAGE} and ${env.UI_IMAGE}."
+        }
+      }
+    }
+
+    stage('Backup Production Database') {
+      steps {
+        withCredentials([
+          sshUserPrivateKey(
+            credentialsId: 'production-ssh',
+            keyFileVariable: 'SSH_KEY_FILE',
+            usernameVariable: 'PROD_SSH_USER',
+          ),
+          string(
+            credentialsId: 'production-db-password',
+            variable: 'PROD_DB_PASSWORD',
+          ),
+        ]) {
+          script {
+            env.LAST_DB_BACKUP_PATH = sh(script: 'bash scripts/backup-production-db.sh', returnStdout: true).trim()
+            echo "Production database backup created at ${env.LAST_DB_BACKUP_PATH}"
+          }
         }
       }
     }
@@ -191,7 +213,7 @@ pipeline {
     stage('Deployment Summary') {
       steps {
         script {
-          def summary = "Production deploy succeeded. live=${env.TARGET_DEPLOY_SLOT}, previous=${env.LIVE_SLOT}, sha=${env.APP_BUILD_SHA}"
+          def summary = "Production deploy succeeded. live=${env.TARGET_DEPLOY_SLOT}, previous=${env.LIVE_SLOT}, sha=${env.APP_BUILD_SHA}, backup=${env.LAST_DB_BACKUP_PATH}"
           currentBuild.description = summary
           echo summary
         }
