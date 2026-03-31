@@ -1,3 +1,12 @@
+def selectIdleSlot(requestedSlot) {
+  if (requestedSlot == 'blue' || requestedSlot == 'green') {
+    return requestedSlot
+  }
+
+  def currentLiveSlot = 'blue'
+  return currentLiveSlot == 'blue' ? 'green' : 'blue'
+}
+
 pipeline {
   agent any
 
@@ -6,6 +15,24 @@ pipeline {
     disableConcurrentBuilds()
     timeout(time: 60, unit: 'MINUTES')
     buildDiscarder(logRotator(numToKeepStr: '20'))
+  }
+
+  environment {
+    REGISTRY = 'ghcr.io'
+    IMAGE_NAMESPACE = 'ghcr.io/stranskymaria'
+    API_IMAGE_NAME = 'simplenotes-api'
+    UI_IMAGE_NAME = 'simplenotes-ui'
+    PROD_BLUE_HOST = '192.168.2.8'
+    PROD_GREEN_HOST = '192.168.2.9'
+    PROD_DB_HOST = '192.168.2.10'
+    NGINX_HOST = '192.168.2.11'
+    PROD_BLUE_PATH = '/home/ubuntu/simplenotes-prod-blue'
+    PROD_GREEN_PATH = '/home/ubuntu/simplenotes-prod-green'
+    PROD_DB_USER = 'appuser'
+    PROD_DB_NAME = 'notes_db'
+    PROD_API_PORT = '3001'
+    PROD_UI_PORT = '5173'
+    PROD_PUBLIC_API_URL = 'http://192.168.2.11/api'
   }
 
   parameters {
@@ -30,43 +57,99 @@ pipeline {
 
     stage('Validate Manual Trigger') {
       steps {
-        echo 'Production pipeline scaffold ready. This pipeline should be triggered manually from Jenkins.'
+        echo 'Production pipeline is intended to be triggered manually from Jenkins.'
       }
     }
 
     stage('Detect Live Slot') {
       steps {
-        echo 'TODO: detect whether blue or green is currently receiving traffic.'
+        script {
+          env.LIVE_SLOT = 'blue'
+          echo "Assuming live production slot is ${env.LIVE_SLOT}. Replace this with real Nginx detection later."
+        }
       }
     }
 
     stage('Select Idle Slot') {
       steps {
-        echo "TODO: choose the idle slot based on TARGET_SLOT=${params.TARGET_SLOT}."
+        script {
+          env.TARGET_DEPLOY_SLOT = selectIdleSlot(params.TARGET_SLOT)
+          env.PROD_SLOT_HOST = env.TARGET_DEPLOY_SLOT == 'blue' ? env.PROD_BLUE_HOST : env.PROD_GREEN_HOST
+          env.PROD_SLOT_PATH = env.TARGET_DEPLOY_SLOT == 'blue' ? env.PROD_BLUE_PATH : env.PROD_GREEN_PATH
+          echo "Selected idle slot ${env.TARGET_DEPLOY_SLOT} on host ${env.PROD_SLOT_HOST}."
+        }
+      }
+    }
+
+    stage('Prepare Production Metadata') {
+      steps {
+        script {
+          env.APP_BUILD_SHA = params.IMAGE_TAG?.trim() ? params.IMAGE_TAG.trim() : sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
+          env.API_IMAGE = "${env.IMAGE_NAMESPACE}/${env.API_IMAGE_NAME}:${env.APP_BUILD_SHA}"
+          env.UI_IMAGE = "${env.IMAGE_NAMESPACE}/${env.UI_IMAGE_NAME}:${env.APP_BUILD_SHA}"
+          echo "Prepared production image tags ${env.API_IMAGE} and ${env.UI_IMAGE}."
+        }
       }
     }
 
     stage('Deploy Idle Slot') {
       steps {
-        echo 'TODO: pull images and deploy the selected production slot.'
+        withCredentials([
+          usernamePassword(
+            credentialsId: 'github-creds',
+            usernameVariable: 'GITHUB_USERNAME',
+            passwordVariable: 'GITHUB_TOKEN',
+          ),
+          sshUserPrivateKey(
+            credentialsId: 'production-ssh',
+            keyFileVariable: 'SSH_KEY_FILE',
+            usernameVariable: 'PROD_SSH_USER',
+          ),
+          string(
+            credentialsId: 'production-db-password',
+            variable: 'PROD_DB_PASSWORD',
+          ),
+        ]) {
+          sh 'bash scripts/deploy-production-slot.sh'
+        }
       }
     }
 
     stage('Smoke Tests') {
       steps {
-        echo 'TODO: run health and smoke tests against the idle production slot.'
+        sh 'bash scripts/production-slot-smoke-tests.sh'
       }
     }
 
     stage('Switch Traffic') {
       steps {
-        echo 'TODO: update Nginx upstream and switch traffic to the healthy slot.'
+        withCredentials([sshUserPrivateKey(
+          credentialsId: 'production-ssh',
+          keyFileVariable: 'SSH_KEY_FILE',
+          usernameVariable: 'PROD_SSH_USER',
+        )]) {
+          sh 'bash scripts/switch-nginx-slot.sh'
+        }
       }
     }
 
     stage('Rollback Monitoring') {
       steps {
-        echo 'TODO: monitor for 10 minutes and roll back if health checks fail.'
+        script {
+          echo "Monitoring slot ${env.TARGET_DEPLOY_SLOT} for 10 minutes before considering rollback logic complete."
+        }
+        sh '''
+          for attempt in $(seq 1 10); do
+            if ! curl -fsS "http://192.168.2.11/api/health" >/dev/null; then
+              echo "Production health check failed during monitoring window." >&2
+              exit 1
+            fi
+
+            if [ "$attempt" -lt 10 ]; then
+              sleep 60
+            fi
+          done
+        '''
       }
     }
   }
