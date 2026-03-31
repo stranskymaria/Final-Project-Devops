@@ -130,9 +130,9 @@ pipeline {
       }
     }
 
-    stage('Smoke Tests') {
+    stage('Pre-Switch Validation Tests') {
       steps {
-        sh 'bash scripts/production-slot-smoke-tests.sh'
+        sh 'bash scripts/production-slot-validation-tests.sh'
       }
     }
 
