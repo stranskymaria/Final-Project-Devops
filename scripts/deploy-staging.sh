@@ -63,6 +63,8 @@ set -euo pipefail
 cd "${STAGING_PATH}"
 echo "${GITHUB_TOKEN}" | sudo docker login ghcr.io -u "${GITHUB_USERNAME}" --password-stdin
 sudo docker compose pull
+sudo docker compose down --remove-orphans || true
 sudo docker rm -f simplenotes-staging-api simplenotes-staging-ui 2>/dev/null || true
-sudo docker compose up -d --remove-orphans
+sleep 2
+sudo docker compose up -d --force-recreate --remove-orphans
 EOF
