@@ -3,7 +3,6 @@
 set -euo pipefail
 
 required_vars=(
-  TARGET_SLOT
   NGINX_HOST
   PROD_SSH_USER
   SSH_KEY_FILE
@@ -16,11 +15,18 @@ for var_name in "${required_vars[@]}"; do
   fi
 done
 
-case "${TARGET_SLOT}" in
+deploy_slot="${TARGET_DEPLOY_SLOT:-${TARGET_SLOT:-}}"
+
+if [[ -z "${deploy_slot}" ]]; then
+  echo "Missing required environment variable: TARGET_DEPLOY_SLOT or TARGET_SLOT" >&2
+  exit 1
+fi
+
+case "${deploy_slot}" in
   blue|green)
     ;;
   *)
-    echo "Unsupported TARGET_SLOT: ${TARGET_SLOT}" >&2
+    echo "Unsupported deployment slot: ${deploy_slot}" >&2
     exit 1
     ;;
 esac
@@ -31,7 +37,7 @@ ssh_opts=(
   -o UserKnownHostsFile=/dev/null
 )
 
-case "${TARGET_SLOT}" in
+case "${deploy_slot}" in
   blue)
     ui_upstream="http://192.168.2.8:5173"
     api_upstream="http://192.168.2.8:3001"

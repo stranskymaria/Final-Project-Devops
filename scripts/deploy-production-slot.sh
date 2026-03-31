@@ -3,7 +3,6 @@
 set -euo pipefail
 
 required_vars=(
-  TARGET_SLOT
   PROD_SLOT_HOST
   PROD_SLOT_PATH
   PROD_SSH_USER
@@ -25,10 +24,17 @@ for var_name in "${required_vars[@]}"; do
   fi
 done
 
+deploy_slot="${TARGET_DEPLOY_SLOT:-${TARGET_SLOT:-}}"
+
+if [[ -z "${deploy_slot}" ]]; then
+  echo "Missing required environment variable: TARGET_DEPLOY_SLOT or TARGET_SLOT" >&2
+  exit 1
+fi
+
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
 
-case "${TARGET_SLOT}" in
+case "${deploy_slot}" in
   blue)
     compose_template="infrastructure/app/production-blue/docker-compose.yml"
     ;;
@@ -36,7 +42,7 @@ case "${TARGET_SLOT}" in
     compose_template="infrastructure/app/production-green/docker-compose.yml"
     ;;
   *)
-    echo "Unsupported TARGET_SLOT: ${TARGET_SLOT}" >&2
+    echo "Unsupported deployment slot: ${deploy_slot}" >&2
     exit 1
     ;;
 esac
