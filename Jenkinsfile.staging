@@ -1,0 +1,215 @@
+import groovy.json.JsonOutput
+
+def isStagingBranchBuild() {
+  return env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'release'
+}
+
+def getGithubRepoSlug() {
+  def gitUrl = env.GIT_URL ?: ''
+  def matcher = (gitUrl =~ /[:\/]([^\/:]+\/[^\/]+?)(?:\.git)?$/)
+  return matcher ? matcher[0][1] : ''
+}
+
+pipeline {
+  agent any
+
+  options {
+    timestamps()
+    disableConcurrentBuilds()
+    timeout(time: 40, unit: 'MINUTES')
+    buildDiscarder(logRotator(numToKeepStr: '20'))
+  }
+
+  environment {
+    REGISTRY = 'ghcr.io'
+    IMAGE_NAMESPACE = 'ghcr.io/stranskymaria'
+    API_IMAGE_NAME = 'simplenotes-api'
+    UI_IMAGE_NAME = 'simplenotes-ui'
+    STAGING_HOST = '192.168.2.6'
+    STAGING_PATH = '/home/ubuntu/simplenotes-staging'
+    STAGING_DB_HOST = '192.168.2.7'
+    STAGING_DB_USER = 'appuser'
+    STAGING_DB_NAME = 'notes_db'
+    STAGING_TEST_DB_NAME = 'notes_db_test'
+    STAGING_API_PORT = '3001'
+    STAGING_UI_PORT = '5173'
+    STAGING_VITE_API_URL = 'http://192.168.2.6:3001/api'
+  }
+
+  stages {
+    stage('Checkout') {
+      steps {
+        checkout scm
+      }
+    }
+
+    stage('Validate Trigger') {
+      steps {
+        script {
+          if (isStagingBranchBuild()) {
+            echo "Running staging deployment flow for branch ${env.BRANCH_NAME}."
+          } else {
+            currentBuild.description = 'Not a main/release branch build'
+            echo 'Skipping staging pipeline because this build is not running on main or release.'
+          }
+        }
+      }
+    }
+
+    stage('Prepare Staging Metadata') {
+      when {
+        expression {
+          return isStagingBranchBuild()
+        }
+      }
+      steps {
+        script {
+          env.APP_BUILD_SHA = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
+          env.API_IMAGE = "${env.IMAGE_NAMESPACE}/${env.API_IMAGE_NAME}:${env.APP_BUILD_SHA}"
+          env.UI_IMAGE = "${env.IMAGE_NAMESPACE}/${env.UI_IMAGE_NAME}:${env.APP_BUILD_SHA}"
+          echo "Prepared staging image tags ${env.API_IMAGE} and ${env.UI_IMAGE}."
+        }
+      }
+    }
+
+    stage('Build and Push Images') {
+      when {
+        expression {
+          return isStagingBranchBuild()
+        }
+      }
+      stages {
+        stage('Registry Login') {
+          steps {
+            withCredentials([usernamePassword(
+              credentialsId: 'github-creds',
+              usernameVariable: 'GITHUB_USERNAME',
+              passwordVariable: 'GITHUB_TOKEN',
+            )]) {
+              sh '''
+                echo "$GITHUB_TOKEN" | docker login "$REGISTRY" -u "$GITHUB_USERNAME" --password-stdin
+              '''
+            }
+          }
+        }
+
+        stage('Build and Push Application Images') {
+          parallel {
+            stage('Build and Push Backend') {
+              steps {
+                sh """
+                  docker build -t "${API_IMAGE}" -f SimpleNotesAPI/Dockerfile .
+                  docker push "${API_IMAGE}"
+                """
+              }
+            }
+
+            stage('Build and Push Frontend') {
+              steps {
+                sh """
+                  docker build -t "${UI_IMAGE}" -f SimpleNotesUI/Dockerfile .
+                  docker push "${UI_IMAGE}"
+                """
+              }
+            }
+          }
+        }
+      }
+    }
+
+    stage('Deploy to Staging') {
+      when {
+        expression {
+          return isStagingBranchBuild()
+        }
+      }
+      steps {
+        withCredentials([
+          usernamePassword(
+            credentialsId: 'github-creds',
+            usernameVariable: 'GITHUB_USERNAME',
+            passwordVariable: 'GITHUB_TOKEN',
+          ),
+          sshUserPrivateKey(
+            credentialsId: 'staging-ssh',
+            keyFileVariable: 'SSH_KEY_FILE',
+            usernameVariable: 'STAGING_SSH_USER',
+          ),
+          string(
+            credentialsId: 'staging-db-password',
+            variable: 'STAGING_DB_PASSWORD',
+          ),
+        ]) {
+          sh 'bash scripts/deploy-staging.sh'
+        }
+      }
+    }
+
+    stage('Staging Integration Tests') {
+      when {
+        expression {
+          return isStagingBranchBuild()
+        }
+      }
+      steps {
+        sh 'bash scripts/staging-integration-tests.sh'
+      }
+    }
+  }
+
+  post {
+    failure {
+      script {
+        if (isStagingBranchBuild()) {
+          def repoSlug = getGithubRepoSlug()
+
+          if (!repoSlug) {
+            echo 'Skipping staging failure comment because the GitHub repository slug could not be determined from GIT_URL.'
+          } else {
+            def commitSha = sh(script: 'git rev-parse HEAD', returnStdout: true).trim()
+            def commitComment = """Staging deployment pipeline failed.
+
+- Build: ${env.BUILD_URL}
+- Branch: ${env.BRANCH_NAME}
+- Commit: ${commitSha}
+
+Please review the Jenkins staging pipeline log before promoting this version further."""
+
+            writeFile(
+              file: 'staging-comment.json',
+              text: JsonOutput.toJson([body: commitComment]),
+            )
+
+            withCredentials([usernamePassword(
+              credentialsId: 'github-creds',
+              usernameVariable: 'GITHUB_USERNAME',
+              passwordVariable: 'GITHUB_TOKEN',
+            )]) {
+              sh """
+                curl -sS \
+                  -u "$GITHUB_USERNAME:$GITHUB_TOKEN" \
+                  -H "Accept: application/vnd.github+json" \
+                  -H "X-GitHub-Api-Version: 2022-11-28" \
+                  -X POST \
+                  "https://api.github.com/repos/${repoSlug}/commits/${commitSha}/comments" \
+                  --data @staging-comment.json
+              """
+            }
+          }
+        }
+      }
+    }
+
+    always {
+      script {
+        if (isStagingBranchBuild()) {
+          sh '''
+            docker image rm -f "${API_IMAGE}" "${UI_IMAGE}" 2>/dev/null || true
+            docker system prune -f >/dev/null 2>&1 || true
+          '''
+        }
+      }
+      echo "Build finished with status: ${currentBuild.currentResult}"
+    }
+  }
+}

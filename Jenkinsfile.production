@@ -1,0 +1,275 @@
+def selectIdleSlot(requestedSlot, liveSlot) {
+  if (requestedSlot == 'blue' || requestedSlot == 'green') {
+    return requestedSlot
+  }
+
+  return liveSlot == 'blue' ? 'green' : 'blue'
+}
+
+def isReleaseBranchBuild() {
+  return env.BRANCH_NAME == 'release' || env.GIT_BRANCH == 'origin/release'
+}
+
+pipeline {
+  agent any
+
+  options {
+    timestamps()
+    disableConcurrentBuilds()
+    timeout(time: 60, unit: 'MINUTES')
+    buildDiscarder(logRotator(numToKeepStr: '20'))
+  }
+
+  environment {
+    REGISTRY = 'ghcr.io'
+    IMAGE_NAMESPACE = 'ghcr.io/stranskymaria'
+    GITHUB_REPOSITORY = 'stranskymaria/Final-Project-Devops'
+    API_IMAGE_NAME = 'simplenotes-api'
+    UI_IMAGE_NAME = 'simplenotes-ui'
+    PROD_BLUE_HOST = '192.168.2.8'
+    PROD_GREEN_HOST = '192.168.2.9'
+    PROD_DB_HOST = '192.168.2.10'
+    PROD_DB_BACKUP_PATH = '/home/ubuntu/simplenotes-db-backups'
+    NGINX_HOST = '192.168.2.11'
+    PROD_BLUE_PATH = '/home/ubuntu/simplenotes-prod-blue'
+    PROD_GREEN_PATH = '/home/ubuntu/simplenotes-prod-green'
+    PROD_DB_USER = 'appuser'
+    PROD_DB_NAME = 'notes_db'
+    PROD_API_PORT = '3001'
+    PROD_UI_PORT = '5173'
+    PROD_PUBLIC_API_URL = 'http://192.168.2.11/api'
+  }
+
+  parameters {
+    choice(
+      name: 'TARGET_SLOT',
+      choices: ['auto', 'blue', 'green'],
+      description: 'Choose the production slot to deploy, or use auto to let the pipeline decide.'
+    )
+    string(
+      name: 'IMAGE_TAG',
+      defaultValue: '',
+      description: 'Docker image tag to deploy. Leave empty to use the latest approved staging build.'
+    )
+    string(
+      name: 'MONITOR_MINUTES',
+      defaultValue: '10',
+      description: 'Number of minutes to monitor production after switching traffic.'
+    )
+  }
+
+  stages {
+    stage('Checkout') {
+      steps {
+        checkout scm
+      }
+    }
+
+    stage('Validate Manual Trigger') {
+      steps {
+        script {
+          if (!isReleaseBranchBuild()) {
+            currentBuild.description = "Production pipeline must run from release. Current branch: ${env.BRANCH_NAME ?: env.GIT_BRANCH ?: 'unknown'}"
+            error('Production pipeline is restricted to the release branch.')
+          }
+
+          echo 'Production pipeline is intended to be triggered manually from Jenkins using the release branch.'
+        }
+      }
+    }
+
+    stage('Detect Live Production Slot') {
+      steps {
+        withCredentials([sshUserPrivateKey(
+          credentialsId: 'production-ssh',
+          keyFileVariable: 'SSH_KEY_FILE',
+          usernameVariable: 'PROD_SSH_USER',
+        )]) {
+          script {
+            env.LIVE_SLOT = sh(script: 'bash scripts/detect-production-live-slot.sh', returnStdout: true).trim()
+            echo "Detected live production slot from Nginx: ${env.LIVE_SLOT}"
+          }
+        }
+      }
+    }
+
+    stage('Select Deployment Slot') {
+      steps {
+        script {
+          env.TARGET_DEPLOY_SLOT = selectIdleSlot(params.TARGET_SLOT, env.LIVE_SLOT)
+          env.PROD_SLOT_HOST = env.TARGET_DEPLOY_SLOT == 'blue' ? env.PROD_BLUE_HOST : env.PROD_GREEN_HOST
+          env.PROD_SLOT_PATH = env.TARGET_DEPLOY_SLOT == 'blue' ? env.PROD_BLUE_PATH : env.PROD_GREEN_PATH
+          echo "Live slot is ${env.LIVE_SLOT}; selected deployment slot ${env.TARGET_DEPLOY_SLOT} on host ${env.PROD_SLOT_HOST}."
+        }
+      }
+    }
+
+    stage('Prepare Release Metadata') {
+      steps {
+        script {
+          env.APP_BUILD_SHA = params.IMAGE_TAG?.trim() ? params.IMAGE_TAG.trim() : sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
+          env.GIT_COMMIT_SHA = sh(script: 'git rev-parse HEAD', returnStdout: true).trim()
+          env.API_IMAGE = "${env.IMAGE_NAMESPACE}/${env.API_IMAGE_NAME}:${env.APP_BUILD_SHA}"
+          env.UI_IMAGE = "${env.IMAGE_NAMESPACE}/${env.UI_IMAGE_NAME}:${env.APP_BUILD_SHA}"
+          env.ROLLBACK_EXECUTED = 'false'
+          currentBuild.displayName = "#${env.BUILD_NUMBER} ${env.APP_BUILD_SHA} -> ${env.TARGET_DEPLOY_SLOT}"
+          currentBuild.description = "live=${env.LIVE_SLOT}, target=${env.TARGET_DEPLOY_SLOT}, sha=${env.APP_BUILD_SHA}"
+          echo "Prepared production image tags ${env.API_IMAGE} and ${env.UI_IMAGE}."
+        }
+      }
+    }
+
+    stage('Backup Production Database') {
+      steps {
+        withCredentials([
+          sshUserPrivateKey(
+            credentialsId: 'production-ssh',
+            keyFileVariable: 'SSH_KEY_FILE',
+            usernameVariable: 'PROD_SSH_USER',
+          ),
+          string(
+            credentialsId: 'production-db-password',
+            variable: 'PROD_DB_PASSWORD',
+          ),
+        ]) {
+          script {
+            env.LAST_DB_BACKUP_PATH = sh(script: 'bash scripts/backup-production-db.sh', returnStdout: true).trim()
+            echo "Production database backup created at ${env.LAST_DB_BACKUP_PATH}"
+          }
+        }
+      }
+    }
+
+    stage('Deploy To Idle Slot') {
+      steps {
+        withCredentials([
+          usernamePassword(
+            credentialsId: 'github-creds',
+            usernameVariable: 'GITHUB_USERNAME',
+            passwordVariable: 'GITHUB_TOKEN',
+          ),
+          sshUserPrivateKey(
+            credentialsId: 'production-ssh',
+            keyFileVariable: 'SSH_KEY_FILE',
+            usernameVariable: 'PROD_SSH_USER',
+          ),
+          string(
+            credentialsId: 'production-db-password',
+            variable: 'PROD_DB_PASSWORD',
+          ),
+        ]) {
+          sh 'bash scripts/deploy-production-slot.sh'
+        }
+      }
+    }
+
+    stage('Pre-Switch Validation Tests') {
+      steps {
+        sh 'bash scripts/production-slot-validation-tests.sh'
+      }
+    }
+
+    stage('Switch Production Traffic') {
+      steps {
+        withCredentials([sshUserPrivateKey(
+          credentialsId: 'production-ssh',
+          keyFileVariable: 'SSH_KEY_FILE',
+          usernameVariable: 'PROD_SSH_USER',
+        )]) {
+          sh 'bash scripts/switch-nginx-slot.sh'
+        }
+      }
+    }
+
+    stage('Post-Switch Monitoring') {
+      steps {
+        script {
+          def monitorMinutes = params.MONITOR_MINUTES?.trim() ?: '10'
+          if (!monitorMinutes.isInteger() || monitorMinutes.toInteger() < 1) {
+            error("MONITOR_MINUTES must be a positive integer. Received: ${params.MONITOR_MINUTES}")
+          }
+          env.MONITOR_MINUTES_RESOLVED = monitorMinutes
+          echo "Monitoring slot ${env.TARGET_DEPLOY_SLOT} for ${env.MONITOR_MINUTES_RESOLVED} minute(s) after traffic switch."
+          try {
+            sh '''
+              for attempt in $(seq 1 "${MONITOR_MINUTES_RESOLVED}"); do
+                if ! curl -fsS "http://192.168.2.11/api/health" >/dev/null; then
+                  echo "Production health check failed during monitoring window." >&2
+                  exit 1
+                fi
+
+                if [ "$attempt" -lt "${MONITOR_MINUTES_RESOLVED}" ]; then
+                  sleep 60
+                fi
+              done
+            '''
+          } catch (Exception ex) {
+            env.ROLLBACK_EXECUTED = 'true'
+            withCredentials([sshUserPrivateKey(
+              credentialsId: 'production-ssh',
+              keyFileVariable: 'SSH_KEY_FILE',
+              usernameVariable: 'PROD_SSH_USER',
+            )]) {
+              withEnv(["TARGET_SLOT=${env.LIVE_SLOT}"]) {
+                sh 'bash scripts/switch-nginx-slot.sh'
+              }
+            }
+            currentBuild.description = "rolled back to ${env.LIVE_SLOT} after failed monitoring, attempted ${env.TARGET_DEPLOY_SLOT}, sha=${env.APP_BUILD_SHA}"
+            error("Production health check failed after switch. Traffic was rolled back to ${env.LIVE_SLOT}.")
+          }
+        }
+      }
+    }
+
+    stage('Deployment Summary') {
+      steps {
+        script {
+          def summary = "Production deploy succeeded. live=${env.TARGET_DEPLOY_SLOT}, previous=${env.LIVE_SLOT}, sha=${env.APP_BUILD_SHA}, backup=${env.LAST_DB_BACKUP_PATH}"
+          currentBuild.description = summary
+          echo summary
+        }
+      }
+    }
+  }
+
+  post {
+    success {
+      withCredentials([usernamePassword(
+        credentialsId: 'github-creds',
+        usernameVariable: 'GITHUB_USERNAME',
+        passwordVariable: 'GITHUB_TOKEN',
+      )]) {
+        withEnv([
+          "STATUS_STATE=success",
+          "STATUS_DESCRIPTION=Production deploy completed successfully on ${env.TARGET_DEPLOY_SLOT}",
+        ]) {
+          sh 'bash scripts/report-production-deployment-status.sh'
+        }
+      }
+    }
+
+    failure {
+      withCredentials([usernamePassword(
+        credentialsId: 'github-creds',
+        usernameVariable: 'GITHUB_USERNAME',
+        passwordVariable: 'GITHUB_TOKEN',
+      )]) {
+        script {
+          def description = env.ROLLBACK_EXECUTED == 'true'
+            ? "Production deploy failed; traffic rolled back to ${env.LIVE_SLOT}"
+            : "Production deploy failed; check Jenkins build log"
+          withEnv([
+            'STATUS_STATE=failure',
+            "STATUS_DESCRIPTION=${description}",
+          ]) {
+            sh 'bash scripts/report-production-deployment-status.sh'
+          }
+        }
+      }
+    }
+
+    always {
+      echo "Build finished with status: ${currentBuild.currentResult}"
+    }
+  }
+}

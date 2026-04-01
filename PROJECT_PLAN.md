@@ -237,23 +237,25 @@ Manual approval from Jenkins
 
 1. Detect which slot is live
 2. Select the idle slot
-3. Pull latest frontend/backend images
-4. Deploy app to the idle slot
-5. Run smoke tests on idle slot
-6. Update Nginx to point traffic to the idle slot
-7. Monitor health for 10 minutes
-8. Roll back if unhealthy
+3. Create a production DB backup before deployment
+4. Pull latest frontend/backend images
+5. Deploy app to the idle slot
+6. Run health checks and integration tests on the idle slot before switching traffic
+7. Update Nginx to point traffic to the idle slot
+8. Monitor health after the switch
+9. Roll back automatically if unhealthy
 
-### Smoke tests
+### Pre-switch validation tests
 
 - backend health endpoint
+- notes API flow
 - frontend homepage
-- API docs or notes endpoint
 
 ### Rollback strategy
 
 - restore Nginx upstream to previous slot
 - keep previous app slot intact during switch
+- keep the database backup available before deployment
 
 ## Phase 8: Nginx Blue/Green Switching
 
@@ -300,7 +302,7 @@ Implement basic health monitoring.
 
 - poll health endpoints every minute
 - count consecutive failures
-- restart affected container if threshold is reached
+- re-provision the affected container if threshold is reached
 
 ### Good candidates
 
@@ -351,6 +353,8 @@ The project is complete when you can demonstrate:
 - a manual Jenkins action deploys to blue or green
 - Nginx switches traffic
 - a failed deployment can roll back
+- production DB backup is created before deploy
+- monitoring can detect failures and trigger auto-recovery
 
 ## Expected Repository Additions Later
 

@@ -1,0 +1,169 @@
+import groovy.json.JsonOutput
+
+def isCiPullRequest() {
+  return env.CHANGE_ID && (env.CHANGE_TARGET == 'main' || env.CHANGE_TARGET == 'release')
+}
+
+def getGithubRepoSlug() {
+  def changeUrl = env.CHANGE_URL ?: ''
+  def matcher = (changeUrl =~ /github\.com\/([^\/]+\/[^\/]+)\/pull\/\d+/)
+  return matcher ? matcher[0][1] : ''
+}
+
+def isMergePullRequestBuild() {
+  def jobName = env.JOB_NAME ?: ''
+  return isCiPullRequest() && jobName.contains('-merge')
+}
+
+pipeline {
+  agent any
+
+  options {
+    timestamps()
+    disableConcurrentBuilds()
+    timeout(time: 20, unit: 'MINUTES')
+    buildDiscarder(logRotator(numToKeepStr: '20'))
+  }
+
+  stages {
+    stage('Checkout') {
+      steps {
+        checkout scm
+      }
+    }
+
+    stage('Validate Trigger') {
+      steps {
+        script {
+          def changeBranch = env.CHANGE_BRANCH ?: ''
+          def changeTarget = env.CHANGE_TARGET ?: ''
+
+          if (isCiPullRequest()) {
+            echo "Running CI for PR #${env.CHANGE_ID} from ${changeBranch} to ${changeTarget}."
+          } else {
+            currentBuild.description = 'Not a PR to main/release'
+            echo 'Skipping CI checks because this build is not a PR targeting main or release.'
+          }
+        }
+      }
+    }
+
+    stage('Install Dependencies') {
+      when {
+        expression {
+          return isCiPullRequest()
+        }
+      }
+      parallel {
+        stage('Install Backend Dependencies') {
+          steps {
+            dir('SimpleNotesAPI') {
+              sh 'npm ci'
+            }
+          }
+        }
+
+        stage('Install Frontend Dependencies') {
+          steps {
+            dir('SimpleNotesUI') {
+              sh 'npm ci --legacy-peer-deps'
+            }
+          }
+        }
+      }
+    }
+
+    stage('Quality Checks') {
+      when {
+        expression {
+          return isCiPullRequest()
+        }
+      }
+      failFast true
+      parallel {
+        stage('Backend Lint') {
+          steps {
+            dir('SimpleNotesAPI') {
+              sh 'npm run lint'
+            }
+          }
+        }
+
+        stage('Backend Tests') {
+          steps {
+            dir('SimpleNotesAPI') {
+              sh 'npm run test:unit'
+            }
+          }
+        }
+
+        stage('Frontend Lint') {
+          steps {
+            dir('SimpleNotesUI') {
+              sh 'npm run lint'
+            }
+          }
+        }
+
+        stage('Frontend Tests') {
+          steps {
+            dir('SimpleNotesUI') {
+              sh 'npm test -- --run'
+            }
+          }
+        }
+      }
+    }
+  }
+
+  post {
+    failure {
+      script {
+        if (isMergePullRequestBuild()) {
+          def repoSlug = getGithubRepoSlug()
+
+          if (!repoSlug) {
+            echo 'Skipping PR failure comment because the GitHub repository slug could not be determined from CHANGE_URL.'
+            return
+          }
+
+          def prComment = """CI checks failed for this pull request.
+
+- Build: ${env.BUILD_URL}
+- PR: #${env.CHANGE_ID}
+- Source branch: ${env.CHANGE_BRANCH}
+- Target branch: ${env.CHANGE_TARGET}
+
+Please review the Jenkins build log and fix the failing stage before merging."""
+
+          writeFile(
+            file: 'pr-comment.json',
+            text: JsonOutput.toJson([body: prComment]),
+          )
+
+          withCredentials([usernamePassword(
+            credentialsId: 'github-creds',
+            usernameVariable: 'GITHUB_USERNAME',
+            passwordVariable: 'GITHUB_TOKEN',
+          )]) {
+            sh """
+              curl -sS \
+                -u "$GITHUB_USERNAME:$GITHUB_TOKEN" \
+                -H "Accept: application/vnd.github+json" \
+                -H "X-GitHub-Api-Version: 2022-11-28" \
+                -X POST \
+                "https://api.github.com/repos/${repoSlug}/issues/${env.CHANGE_ID}/comments" \
+                --data @pr-comment.json
+            """
+          }
+        } else if (isCiPullRequest()) {
+          echo 'Skipping PR failure comment for the head build; the merge build is responsible for posting the PR comment.'
+        }
+      }
+    }
+
+    always {
+      echo "Build finished with status: ${currentBuild.currentResult}"
+    }
+  }
+}
