@@ -2,6 +2,7 @@
 
 set -euo pipefail
 
+# Run a lightweight end-to-end validation against the live staging environment.
 base_url="${STAGING_BASE_URL:-http://192.168.2.6:3001}"
 ui_url="${STAGING_UI_URL:-http://192.168.2.6:5173}"
 title="CI staging note $(date +%s)"
@@ -22,6 +23,7 @@ for attempt in $(seq 1 12); do
   sleep 5
 done
 
+# Validate the core notes flow: create, read, list, delete, then confirm deletion.
 echo "Creating note through staging API..."
 create_response="$(
   curl -fsS \
@@ -69,6 +71,7 @@ if [ "${delete_check_status}" != "404" ]; then
   exit 1
 fi
 
+# Confirm the staging frontend is also reachable.
 echo "Checking staging UI..."
 curl -fsSI "${ui_url}" >/dev/null
 

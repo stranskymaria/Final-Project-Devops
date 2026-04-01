@@ -2,6 +2,7 @@
 
 set -euo pipefail
 
+# Prepare a fresh Ubuntu VM with the common tools used across the project.
 echo "Updating package lists..."
 sudo apt-get update
 

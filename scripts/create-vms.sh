@@ -2,6 +2,7 @@
 
 set -euo pipefail
 
+# Fail early if Multipass is not available on the host machine.
 echo "Checking if Multipass is installed..."
 if ! command -v multipass >/dev/null 2>&1; then
   echo "Error: Multipass is not installed."
@@ -19,6 +20,7 @@ create_vm() {
     return
   fi
 
+  # Create the VM only when it does not already exist so the script stays repeatable.
   echo "Creating VM '$name'..."
   multipass launch --name "$name" --cpus "$cpus" --memory "$memory" --disk "$disk"
   echo "VM '$name' created."
@@ -32,6 +34,7 @@ create_vm "prod-green" "2" "2G" "15G"
 create_vm "db" "2" "2G" "15G"
 create_vm "nginx" "1" "1G" "10G"
 
+# Print the final VM inventory to make the result easy to verify.
 echo ""
 echo "All VMs processed."
 multipass list
