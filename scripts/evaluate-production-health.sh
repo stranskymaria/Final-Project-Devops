@@ -2,6 +2,7 @@
 
 set -euo pipefail
 
+# This script updates the monitoring state between scheduled Jenkins runs.
 required_vars=(
   PROD_PUBLIC_BASE_URL
   MONITOR_STATE_DIR
@@ -17,6 +18,7 @@ done
 
 mkdir -p "${MONITOR_STATE_DIR}"
 
+# Keep separate counters for frontend and backend so recovery can target only the failing service.
 frontend_fail_file="${MONITOR_STATE_DIR}/frontend_fail_count"
 backend_fail_file="${MONITOR_STATE_DIR}/backend_fail_count"
 status_file="${MONITOR_STATE_DIR}/monitoring-status.env"
@@ -37,6 +39,7 @@ backend_status="healthy"
 recover_frontend="false"
 recover_backend="false"
 
+# Poll the public production endpoints exposed through Nginx.
 if ! curl -fsSI "${PROD_PUBLIC_BASE_URL}/" >/dev/null; then
   frontend_status="failed"
   frontend_fail_count=$((frontend_fail_count + 1))
@@ -59,6 +62,7 @@ if [[ "${backend_fail_count}" -ge "${FAILURE_THRESHOLD_RESOLVED}" ]]; then
   recover_backend="true"
 fi
 
+# Persist the counters and the current decision for the next monitoring build.
 printf '%s\n' "${frontend_fail_count}" > "${frontend_fail_file}"
 printf '%s\n' "${backend_fail_count}" > "${backend_fail_file}"
 

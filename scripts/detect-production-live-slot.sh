@@ -2,6 +2,7 @@
 
 set -euo pipefail
 
+# Read the Nginx active upstream file to determine which production slot is live.
 required_vars=(
   NGINX_HOST
   PROD_SSH_USER

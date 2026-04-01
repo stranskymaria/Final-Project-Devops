@@ -2,6 +2,7 @@
 
 set -euo pipefail
 
+# Jenkins passes all connection and DB details through environment variables.
 required_vars=(
   PROD_DB_HOST
   PROD_DB_BACKUP_PATH
@@ -26,10 +27,12 @@ ssh_opts=(
   -o UserKnownHostsFile=/dev/null
 )
 
+# Each backup file is uniquely identified by timestamp + build SHA.
 timestamp="$(date +%Y-%m-%d_%H-%M-%S)"
 backup_file="${PROD_DB_BACKUP_PATH}/notes_db_${timestamp}_${APP_BUILD_SHA}.sql"
 tmp_backup_file="${backup_file}.tmp"
 
+# Run mysqldump on the production DB VM, then keep only the latest 5 backups.
 ssh "${ssh_opts[@]}" "${PROD_SSH_USER}@${PROD_DB_HOST}" bash <<EOF
 set -euo pipefail
 sudo mkdir -p "${PROD_DB_BACKUP_PATH}"

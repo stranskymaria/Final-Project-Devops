@@ -2,6 +2,7 @@
 
 set -euo pipefail
 
+# Update the Nginx upstream file so public traffic points to the chosen production slot.
 required_vars=(
   NGINX_HOST
   PROD_SSH_USER
@@ -53,6 +54,7 @@ upstream_file="${upstream_dir}/active-upstream.conf"
 tmp_file="$(mktemp)"
 trap 'rm -f "$tmp_file"' EXIT
 
+# Generate the active upstream config locally, then copy and activate it on the Nginx VM.
 cat > "$tmp_file" <<EOF
 set \$simplenotes_upstream ${ui_upstream};
 set \$simplenotes_api_upstream ${api_upstream};
