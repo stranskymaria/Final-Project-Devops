@@ -22,7 +22,7 @@ Use the script below to generate the current IP list:
   - Jenkins
   - Docker
 - IP: `192.168.2.5`
-- Notes: Used to run CI, staging deployment, and production deployment pipelines
+- Notes: Used to run CI, staging deployment, production deployment, and monitoring/self-healing jobs
 
 ### Staging
 
@@ -31,7 +31,7 @@ Use the script below to generate the current IP list:
 - Expected software:
   - Docker
 - IP: `192.168.2.6`
-- Notes: Runs frontend and backend containers for staging
+- Notes: Runs frontend and backend containers for the staging environment
 
 ### Staging Database
 
@@ -41,7 +41,7 @@ Use the script below to generate the current IP list:
   - Docker
   - MySQL
 - IP: `192.168.2.7`
-- Notes: Hosts the staging database
+- Notes: Hosts both `notes_db` and `notes_db_test` for staging
 
 ### Production Blue
 
@@ -50,7 +50,7 @@ Use the script below to generate the current IP list:
 - Expected software:
   - Docker
 - IP: `192.168.2.8`
-- Notes: One of the two production app environments
+- Notes: One of the two production application slots used in blue/green deployment
 
 ### Production Green
 
@@ -59,7 +59,7 @@ Use the script below to generate the current IP list:
 - Expected software:
   - Docker
 - IP: `192.168.2.9`
-- Notes: One of the two production app environments
+- Notes: One of the two production application slots used in blue/green deployment
 
 ### Production Database
 
@@ -69,7 +69,7 @@ Use the script below to generate the current IP list:
   - Docker
   - MySQL
 - IP: `192.168.2.10`
-- Notes: Shared production database used by blue and green app slots
+- Notes: Shared production database used by both blue and green slots; stores DB backups in `/home/ubuntu/simplenotes-db-backups`
 
 ### Nginx
 
@@ -78,7 +78,7 @@ Use the script below to generate the current IP list:
 - Expected software:
   - Nginx
 - IP: `192.168.2.11`
-- Notes: Routes client traffic to either `prod-blue` or `prod-green`
+- Notes: Routes client traffic to either `prod-blue` or `prod-green` and exposes the public production URL
 
 ## Suggested Update Workflow
 
@@ -99,17 +99,24 @@ After creating the VMs:
 - deployment ports
 - environment-specific URLs
 
-## Suggested URLs To Track Later
+## Environment URLs
 
 ### Staging
 
-- Frontend URL: `TBD`
-- Backend URL: `TBD`
-- Health endpoint: `TBD`
+- Frontend URL: `http://192.168.2.6:5173/`
+- API base URL: `http://192.168.2.6:3001/api`
+- API Docs URL: `http://192.168.2.6:3001/api-docs/`
+- Health endpoint: `http://192.168.2.6:3001/api/health`
 
 ### Production
 
-- Public URL: `TBD`
-- Blue app URL: `TBD`
-- Green app URL: `TBD`
-- Health endpoint: `TBD`
+- Public UI URL: `http://192.168.2.11/`
+- Public API base URL: `http://192.168.2.11/api`
+- Public API Docs URL: `http://192.168.2.11/api-docs/`
+- Public health endpoint: `http://192.168.2.11/api/health`
+- Blue slot UI URL: `http://192.168.2.8:5173/`
+- Blue slot API Docs URL: `http://192.168.2.8:3001/api-docs/`
+- Blue slot health endpoint: `http://192.168.2.8:3001/api/health`
+- Green slot UI URL: `http://192.168.2.9:5173/`
+- Green slot API Docs URL: `http://192.168.2.9:3001/api-docs/`
+- Green slot health endpoint: `http://192.168.2.9:3001/api/health`
