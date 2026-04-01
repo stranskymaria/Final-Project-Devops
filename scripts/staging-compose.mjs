@@ -1,5 +1,6 @@
 import { spawnSync } from 'node:child_process';
 
+// Forward docker compose arguments, but inject build metadata first.
 const composeArgs = process.argv.slice(2);
 
 if (composeArgs.length === 0) {
@@ -18,6 +19,8 @@ if (gitShaResult.status !== 0) {
 
 const appBuildSha = gitShaResult.stdout.trim();
 const appDeployColor = process.env.APP_DEPLOY_COLOR?.trim() ?? '';
+
+// Run docker compose with APP_BUILD_SHA/APP_DEPLOY_COLOR available to the compose file.
 const composeResult = spawnSync('docker', ['compose', ...composeArgs], {
   stdio: 'inherit',
   env: {

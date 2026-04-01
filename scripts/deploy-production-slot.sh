@@ -2,6 +2,7 @@
 
 set -euo pipefail
 
+# Validate the variables prepared by Jenkins before attempting the remote deploy.
 required_vars=(
   PROD_SLOT_HOST
   PROD_SLOT_PATH
@@ -34,6 +35,7 @@ fi
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
 
+# Pick the compose template that matches the idle slot selected by Pipeline 3.
 case "${deploy_slot}" in
   blue)
     compose_template="infrastructure/app/production-blue/docker-compose.yml"
@@ -49,6 +51,7 @@ esac
 
 cp "${compose_template}" "$tmp_dir/docker-compose.yml"
 
+# Generate the runtime .env file that will be copied to the target production slot.
 cat > "$tmp_dir/.env" <<EOF
 API_IMAGE=${API_IMAGE}
 UI_IMAGE=${UI_IMAGE}
@@ -72,6 +75,7 @@ ssh_opts=(
 ssh "${ssh_opts[@]}" "${PROD_SSH_USER}@${PROD_SLOT_HOST}" "mkdir -p '${PROD_SLOT_PATH}'"
 scp "${ssh_opts[@]}" "$tmp_dir/docker-compose.yml" "$tmp_dir/.env" "${PROD_SSH_USER}@${PROD_SLOT_HOST}:${PROD_SLOT_PATH}/"
 
+# Log in to GHCR on the target VM, pull the images, and recreate the slot services.
 ssh "${ssh_opts[@]}" "${PROD_SSH_USER}@${PROD_SLOT_HOST}" bash <<EOF
 set -euo pipefail
 cd "${PROD_SLOT_PATH}"

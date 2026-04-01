@@ -2,6 +2,7 @@
 
 set -euo pipefail
 
+# Publish a commit status back to GitHub so the production deployment result is visible there too.
 required_vars=(
   GITHUB_TOKEN
   GITHUB_REPOSITORY
@@ -21,6 +22,7 @@ done
 payload="$(mktemp)"
 trap 'rm -f "$payload"' EXIT
 
+# Build the GitHub Statuses API payload with a link back to the Jenkins build.
 cat > "$payload" <<EOF
 {
   "state": "${STATUS_STATE}",

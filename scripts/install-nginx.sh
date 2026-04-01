@@ -2,6 +2,7 @@
 
 set -euo pipefail
 
+# Install Nginx as the public reverse proxy used for blue/green switching.
 echo "Updating package lists..."
 sudo apt-get update
 

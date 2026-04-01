@@ -2,6 +2,7 @@
 
 set -euo pipefail
 
+# Re-provision only the failing service on the currently live slot.
 required_vars=(
   LIVE_SLOT
   SERVICE_NAME

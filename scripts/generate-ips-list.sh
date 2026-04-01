@@ -2,6 +2,7 @@
 
 set -euo pipefail
 
+# Generate a simple text inventory from the current Multipass VM state.
 if ! command -v multipass >/dev/null 2>&1; then
   echo "Error: Multipass is not installed."
   exit 1
@@ -25,6 +26,7 @@ echo "Generating VM IP list..."
   echo "Generated on: $(date)"
   echo ""
 
+  # Resolve each VM individually so missing machines are still reported clearly.
   for vm in "${VMS[@]}"; do
     if multipass info "$vm" >/dev/null 2>&1; then
       ip=$(multipass info "$vm" | awk '/IPv4/{getline; gsub(/^[[:space:]]+/, "", $0); print $0; exit}')

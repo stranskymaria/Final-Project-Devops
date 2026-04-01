@@ -2,6 +2,7 @@
 
 set -euo pipefail
 
+# Install Jenkins from the official Debian repository and print the initial admin password.
 echo "Updating package lists..."
 sudo apt-get update
 

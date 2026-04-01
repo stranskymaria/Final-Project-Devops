@@ -2,6 +2,7 @@
 
 set -euo pipefail
 
+# Validate the inputs coming from the staging deployment pipeline.
 required_vars=(
   STAGING_HOST
   STAGING_PATH
@@ -27,6 +28,7 @@ done
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
 
+# Use the tracked staging compose template and generate a real .env for this build.
 cp infrastructure/app/staging/docker-compose.yml "$tmp_dir/docker-compose.yml"
 
 cat > "$tmp_dir/.env" <<EOF
@@ -58,6 +60,7 @@ ssh_opts=(
 ssh "${ssh_opts[@]}" "${STAGING_SSH_USER}@${STAGING_HOST}" "mkdir -p '${STAGING_PATH}'"
 scp "${ssh_opts[@]}" "$tmp_dir/docker-compose.yml" "$tmp_dir/.env" "${STAGING_SSH_USER}@${STAGING_HOST}:${STAGING_PATH}/"
 
+# Pull the new images on staging, fully recreate the stack, and avoid name-conflict races.
 ssh "${ssh_opts[@]}" "${STAGING_SSH_USER}@${STAGING_HOST}" bash <<EOF
 set -euo pipefail
 cd "${STAGING_PATH}"

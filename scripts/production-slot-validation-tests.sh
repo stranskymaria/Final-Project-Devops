@@ -2,6 +2,7 @@
 
 set -euo pipefail
 
+# Validate the newly deployed idle production slot before switching public traffic to it.
 required_vars=(
   PROD_SLOT_HOST
 )
@@ -27,6 +28,7 @@ ui_url="http://${PROD_SLOT_HOST}:${ui_port}"
 title="CI production note $(date +%s)"
 content="Created by Jenkins production pre-switch validation tests."
 
+# First wait for the idle slot to become healthy.
 echo "Waiting for production slot ${deploy_slot} backend health endpoint..."
 for attempt in $(seq 1 12); do
   if health_response="$(curl -fsS "${base_url}/api/health")"; then
@@ -42,6 +44,7 @@ for attempt in $(seq 1 12); do
   sleep 5
 done
 
+# Then run a small end-to-end API flow against the idle slot.
 echo "Creating note through production slot ${deploy_slot} API..."
 create_response="$(
   curl -fsS \
@@ -89,6 +92,7 @@ if [ "${delete_check_status}" != "404" ]; then
   exit 1
 fi
 
+# Finally confirm that the frontend container also answers before traffic is switched.
 echo "Checking production slot ${deploy_slot} UI..."
 curl -fsSI "${ui_url}" >/dev/null
 

@@ -2,6 +2,7 @@
 
 set -euo pipefail
 
+# Install Docker Engine and the Compose plugin using Docker's official apt repository.
 echo "Removing old Docker packages if they exist..."
 sudo apt-get remove -y docker docker-engine docker.io containerd runc || true
 
