@@ -1,3 +1,4 @@
+// Turn the current live slot plus an optional manual override into the slot that should receive the new release.
 def selectIdleSlot(requestedSlot, liveSlot) {
   if (requestedSlot == 'blue' || requestedSlot == 'green') {
     return requestedSlot
@@ -6,6 +7,7 @@ def selectIdleSlot(requestedSlot, liveSlot) {
   return liveSlot == 'blue' ? 'green' : 'blue'
 }
 
+// Restrict production releases to the dedicated release branch.
 def isReleaseBranchBuild() {
   return env.BRANCH_NAME == 'release' || env.GIT_BRANCH == 'origin/release'
 }
@@ -68,6 +70,7 @@ pipeline {
     stage('Validate Manual Trigger') {
       steps {
         script {
+          // Fail fast if someone tries to run production from the wrong branch.
           if (!isReleaseBranchBuild()) {
             currentBuild.description = "Production pipeline must run from release. Current branch: ${env.BRANCH_NAME ?: env.GIT_BRANCH ?: 'unknown'}"
             error('Production pipeline is restricted to the release branch.')
@@ -86,6 +89,7 @@ pipeline {
           usernameVariable: 'PROD_SSH_USER',
         )]) {
           script {
+            // Read the active Nginx upstream so the deployment targets the idle blue/green slot.
             env.LIVE_SLOT = sh(script: 'bash scripts/detect-production-live-slot.sh', returnStdout: true).trim()
             echo "Detected live production slot from Nginx: ${env.LIVE_SLOT}"
           }
@@ -96,6 +100,7 @@ pipeline {
     stage('Select Deployment Slot') {
       steps {
         script {
+          // Resolve either the user-requested slot or the automatically selected idle slot.
           env.TARGET_DEPLOY_SLOT = selectIdleSlot(params.TARGET_SLOT, env.LIVE_SLOT)
           env.PROD_SLOT_HOST = env.TARGET_DEPLOY_SLOT == 'blue' ? env.PROD_BLUE_HOST : env.PROD_GREEN_HOST
           env.PROD_SLOT_PATH = env.TARGET_DEPLOY_SLOT == 'blue' ? env.PROD_BLUE_PATH : env.PROD_GREEN_PATH
@@ -107,6 +112,7 @@ pipeline {
     stage('Prepare Release Metadata') {
       steps {
         script {
+          // Capture the exact image tags and commit metadata that define this production release.
           env.APP_BUILD_SHA = params.IMAGE_TAG?.trim() ? params.IMAGE_TAG.trim() : sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
           env.GIT_COMMIT_SHA = sh(script: 'git rev-parse HEAD', returnStdout: true).trim()
           env.API_IMAGE = "${env.IMAGE_NAMESPACE}/${env.API_IMAGE_NAME}:${env.APP_BUILD_SHA}"
@@ -121,6 +127,7 @@ pipeline {
 
     stage('Backup Production Database') {
       steps {
+        // Create a rollback point for production data before changing the live application version.
         withCredentials([
           sshUserPrivateKey(
             credentialsId: 'production-ssh',
@@ -142,6 +149,7 @@ pipeline {
 
     stage('Deploy To Idle Slot') {
       steps {
+        // Refresh only the idle slot so production traffic stays on the stable version during rollout.
         withCredentials([
           usernamePassword(
             credentialsId: 'github-creds',
@@ -165,12 +173,14 @@ pipeline {
 
     stage('Pre-Switch Validation Tests') {
       steps {
+        // Validate health and key API/UI flows on the new slot before exposing it publicly.
         sh 'bash scripts/production-slot-validation-tests.sh'
       }
     }
 
     stage('Switch Production Traffic') {
       steps {
+        // Perform the actual blue/green cutover only after the new slot has passed validation.
         withCredentials([sshUserPrivateKey(
           credentialsId: 'production-ssh',
           keyFileVariable: 'SSH_KEY_FILE',
@@ -184,6 +194,7 @@ pipeline {
     stage('Post-Switch Monitoring') {
       steps {
         script {
+          // Watch the public endpoint for a short window and roll back traffic automatically if it degrades.
           def monitorMinutes = params.MONITOR_MINUTES?.trim() ?: '10'
           if (!monitorMinutes.isInteger() || monitorMinutes.toInteger() < 1) {
             error("MONITOR_MINUTES must be a positive integer. Received: ${params.MONITOR_MINUTES}")
@@ -224,6 +235,7 @@ pipeline {
     stage('Deployment Summary') {
       steps {
         script {
+          // Leave a concise audit summary in Jenkins with slot, image tag, and backup location.
           def summary = "Production deploy succeeded. live=${env.TARGET_DEPLOY_SLOT}, previous=${env.LIVE_SLOT}, sha=${env.APP_BUILD_SHA}, backup=${env.LAST_DB_BACKUP_PATH}"
           currentBuild.description = summary
           echo summary
@@ -234,6 +246,7 @@ pipeline {
 
   post {
     success {
+      // Reflect successful production promotion back into GitHub commit status.
       withCredentials([usernamePassword(
         credentialsId: 'github-creds',
         usernameVariable: 'GITHUB_USERNAME',
@@ -249,6 +262,7 @@ pipeline {
     }
 
     failure {
+      // Report production deployment failures and mention whether rollback was executed automatically.
       withCredentials([usernamePassword(
         credentialsId: 'github-creds',
         usernameVariable: 'GITHUB_USERNAME',
@@ -269,6 +283,7 @@ pipeline {
     }
 
     always {
+      // Always print the final pipeline result so the end of the log is easy to scan.
       echo "Build finished with status: ${currentBuild.currentResult}"
     }
   }

@@ -1,9 +1,11 @@
 import groovy.json.JsonOutput
 
+// Allow staging deployments only from integrated branches that are eligible for promotion.
 def isStagingBranchBuild() {
   return env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'release'
 }
 
+// Resolve the GitHub repo slug dynamically so commit comments work across environments.
 def getGithubRepoSlug() {
   def gitUrl = env.GIT_URL ?: ''
   def matcher = (gitUrl =~ /[:\/]([^\/:]+\/[^\/]+?)(?:\.git)?$/)
@@ -46,6 +48,7 @@ pipeline {
     stage('Validate Trigger') {
       steps {
         script {
+          // Make it explicit whether this branch build should continue into the staging flow.
           if (isStagingBranchBuild()) {
             echo "Running staging deployment flow for branch ${env.BRANCH_NAME}."
           } else {
@@ -63,6 +66,7 @@ pipeline {
         }
       }
       steps {
+        // Freeze the image tags from the current commit so staging always deploys a traceable version.
         script {
           env.APP_BUILD_SHA = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
           env.API_IMAGE = "${env.IMAGE_NAMESPACE}/${env.API_IMAGE_NAME}:${env.APP_BUILD_SHA}"
@@ -81,6 +85,7 @@ pipeline {
       stages {
         stage('Registry Login') {
           steps {
+            // Authenticate once before the parallel Docker builds push their images to GHCR.
             withCredentials([usernamePassword(
               credentialsId: 'github-creds',
               usernameVariable: 'GITHUB_USERNAME',
@@ -94,6 +99,7 @@ pipeline {
         }
 
         stage('Build and Push Application Images') {
+          // Build backend and frontend separately so one image failure does not hide the other.
           parallel {
             stage('Build and Push Backend') {
               steps {
@@ -124,6 +130,7 @@ pipeline {
         }
       }
       steps {
+        // Hand over the selected images and secrets to the staging VM for the actual deployment.
         withCredentials([
           usernamePassword(
             credentialsId: 'github-creds',
@@ -152,6 +159,7 @@ pipeline {
         }
       }
       steps {
+        // Run live API/UI checks against staging so this pipeline validates more than a successful Docker start.
         sh 'bash scripts/staging-integration-tests.sh'
       }
     }
@@ -160,6 +168,7 @@ pipeline {
   post {
     failure {
       script {
+        // Leave a commit comment in GitHub so staging deployment failures are visible outside Jenkins.
         if (isStagingBranchBuild()) {
           def repoSlug = getGithubRepoSlug()
 
@@ -202,6 +211,7 @@ Please review the Jenkins staging pipeline log before promoting this version fur
 
     always {
       script {
+        // Remove temporary build artifacts from the Jenkins VM to avoid slow disk growth over time.
         if (isStagingBranchBuild()) {
           sh '''
             docker image rm -f "${API_IMAGE}" "${UI_IMAGE}" 2>/dev/null || true

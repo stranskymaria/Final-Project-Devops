@@ -1,3 +1,4 @@
+// Reload the small monitoring state file persisted by the previous Jenkins run.
 def parseEnvFile(path) {
   def values = [:]
   if (!fileExists(path)) {
@@ -30,6 +31,7 @@ pipeline {
   }
 
   triggers {
+    // Re-run this job every minute to approximate a simple monitoring loop.
     cron('* * * * *')
   }
 
@@ -66,6 +68,7 @@ pipeline {
           usernameVariable: 'PROD_SSH_USER',
         )]) {
           script {
+            // Detect the slot currently serving traffic so self-healing targets the live environment.
             env.LIVE_SLOT = sh(script: 'bash scripts/detect-production-live-slot.sh', returnStdout: true).trim()
             echo "Detected live production slot: ${env.LIVE_SLOT}"
           }
@@ -76,12 +79,14 @@ pipeline {
     stage('Health Checks') {
       steps {
         script {
+          // Validate the failure threshold once here so the health script can stay focused on probing endpoints.
           def threshold = params.FAILURE_THRESHOLD?.trim() ?: '3'
           if (!threshold.isInteger() || threshold.toInteger() < 1) {
             error("FAILURE_THRESHOLD must be a positive integer. Received: ${params.FAILURE_THRESHOLD}")
           }
           env.FAILURE_THRESHOLD_RESOLVED = threshold
         }
+        // Probe the public frontend and backend, then persist both status and failure counters.
         sh 'bash scripts/evaluate-production-health.sh'
         script {
           def status = parseEnvFile("${env.MONITOR_STATE_DIR}/monitoring-status.env")
@@ -105,6 +110,7 @@ pipeline {
         }
       }
       steps {
+        // Recreate only the affected live service after repeated failures cross the configured threshold.
         withCredentials([sshUserPrivateKey(
           credentialsId: 'production-ssh',
           keyFileVariable: 'SSH_KEY_FILE',
@@ -132,6 +138,7 @@ pipeline {
     stage('Monitoring Summary') {
       steps {
         script {
+          // Summarize each monitoring pass so Jenkins history doubles as a lightweight audit trail.
           def summary = "Monitoring completed. live=${env.LIVE_SLOT}, ui=${env.FRONTEND_STATUS}/${env.FRONTEND_FAIL_COUNT}, api=${env.BACKEND_STATUS}/${env.BACKEND_FAIL_COUNT}"
           if (env.RECOVER_FRONTEND == 'true' || env.RECOVER_BACKEND == 'true') {
             summary += ', recovery-triggered=true'

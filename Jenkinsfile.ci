@@ -1,15 +1,18 @@
 import groovy.json.JsonOutput
 
+// Accept CI only for pull requests that target the protected integration branches.
 def isCiPullRequest() {
   return env.CHANGE_ID && (env.CHANGE_TARGET == 'main' || env.CHANGE_TARGET == 'release')
 }
 
+// Extract the owner/repository slug from GitHub metadata for later API calls.
 def getGithubRepoSlug() {
   def changeUrl = env.CHANGE_URL ?: ''
   def matcher = (changeUrl =~ /github\.com\/([^\/]+\/[^\/]+)\/pull\/\d+/)
   return matcher ? matcher[0][1] : ''
 }
 
+// Post PR comments only from the merge build to avoid duplicate GitHub noise.
 def isMergePullRequestBuild() {
   def jobName = env.JOB_NAME ?: ''
   return isCiPullRequest() && jobName.contains('-merge')
@@ -35,6 +38,7 @@ pipeline {
     stage('Validate Trigger') {
       steps {
         script {
+          // Explain clearly whether this multibranch run should execute the real CI checks.
           def changeBranch = env.CHANGE_BRANCH ?: ''
           def changeTarget = env.CHANGE_TARGET ?: ''
 
@@ -54,6 +58,7 @@ pipeline {
           return isCiPullRequest()
         }
       }
+      // Prepare backend and frontend dependencies in parallel to keep feedback fast.
       parallel {
         stage('Install Backend Dependencies') {
           steps {
@@ -79,6 +84,7 @@ pipeline {
           return isCiPullRequest()
         }
       }
+      // Stop early on the first critical failure while still checking API and UI in parallel.
       failFast true
       parallel {
         stage('Backend Lint') {
@@ -119,6 +125,7 @@ pipeline {
   post {
     failure {
       script {
+        // Surface CI failures directly in the pull request so reviewers can see them without opening Jenkins.
         if (isMergePullRequestBuild()) {
           def repoSlug = getGithubRepoSlug()
 
