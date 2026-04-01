@@ -104,6 +104,8 @@ The pipeline:
 4. recreates the staging containers
 5. runs integration tests against the live staging environment
 
+This pipeline is triggered from `main`.
+
 ### Pipeline 3
 
 `Jenkinsfile.production` uses:
@@ -116,10 +118,13 @@ The pipeline:
 
 1. detects the live production slot
 2. chooses the idle slot
-3. deploys the new version to the idle slot
-4. runs pre-switch validation tests
-5. switches traffic in Nginx
-6. monitors the public endpoint after the switch
+3. creates a production DB backup
+4. deploys the new version to the idle slot
+5. runs pre-switch validation tests
+6. switches traffic in Nginx
+7. monitors the public endpoint after the switch
+
+This pipeline is triggered manually from the `release` branch after the version has already been validated in staging.
 
 ## Manual Usage
 

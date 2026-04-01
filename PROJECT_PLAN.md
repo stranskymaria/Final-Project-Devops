@@ -194,7 +194,7 @@ Implement Pipeline 2.
 
 ### Trigger
 
-Merge or commit to `main` or `release`
+Merge or commit to `main`
 
 ### Required flow
 
@@ -224,7 +224,7 @@ Implement Pipeline 3.
 
 ### Trigger
 
-Manual approval from Jenkins
+Manual approval from Jenkins using the `release` branch
 
 ### Production layout
 
@@ -256,6 +256,17 @@ Manual approval from Jenkins
 - restore Nginx upstream to previous slot
 - keep previous app slot intact during switch
 - keep the database backup available before deployment
+
+### Promotion Model
+
+Recommended promotion flow:
+
+1. `development` -> `main`
+2. CI validation on the PR
+3. automatic deployment to staging from `main`
+4. validation in staging
+5. `main` -> `release`
+6. manual production deployment from `release`
 
 ## Phase 8: Nginx Blue/Green Switching
 
