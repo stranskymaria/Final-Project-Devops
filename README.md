@@ -162,6 +162,8 @@ Backup characteristics:
 
 ## Additional Documentation
 
+- [PIPELINES.md](/Users/mariastransky/Documents/Proiect%20Devops/PIPELINES.md)
+  Dedicated overview of Jenkins jobs and the promotion flow
 - [PROJECT_PLAN.md](/Users/mariastransky/Documents/Proiect%20Devops/PROJECT_PLAN.md)
   High-level project plan
 - [infrastructure/app/README.md](/Users/mariastransky/Documents/Proiect%20Devops/infrastructure/app/README.md)
