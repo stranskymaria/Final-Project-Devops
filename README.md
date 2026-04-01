@@ -77,7 +77,7 @@ Main flow:
 
 Trigger:
 
-- commit or merge to `main` or `release`
+- commit or merge to `main`
 
 Main flow:
 
@@ -91,7 +91,7 @@ Main flow:
 
 Trigger:
 
-- manual run from Jenkins
+- manual run from Jenkins using the `release` branch
 
 Main flow:
 
@@ -103,6 +103,24 @@ Main flow:
 - switch traffic through Nginx
 - monitor the public health endpoint after switch
 - automatically roll back if post-switch monitoring fails
+
+### Release Promotion Flow
+
+The current promotion flow is:
+
+1. develop changes on `development`
+2. open a Pull Request from `development` to `main`
+3. run Pipeline 1
+4. merge into `main`
+5. run Pipeline 2 and validate the version in staging
+6. open a Pull Request from `main` to `release`
+7. merge into `release`
+8. run Pipeline 3 manually from `release` to deploy to production
+
+This keeps:
+
+- `main` as the integration and staging branch
+- `release` as the branch used for production promotion
 
 ### Monitoring and Self-Healing
 
