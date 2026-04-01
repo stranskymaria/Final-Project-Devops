@@ -6,6 +6,10 @@ def selectIdleSlot(requestedSlot, liveSlot) {
   return liveSlot == 'blue' ? 'green' : 'blue'
 }
 
+def isReleaseBranchBuild() {
+  return env.BRANCH_NAME == 'release' || env.GIT_BRANCH == 'origin/release'
+}
+
 pipeline {
   agent any
 
@@ -63,7 +67,14 @@ pipeline {
 
     stage('Validate Manual Trigger') {
       steps {
-        echo 'Production pipeline is intended to be triggered manually from Jenkins.'
+        script {
+          if (!isReleaseBranchBuild()) {
+            currentBuild.description = "Production pipeline must run from release. Current branch: ${env.BRANCH_NAME ?: env.GIT_BRANCH ?: 'unknown'}"
+            error('Production pipeline is restricted to the release branch.')
+          }
+
+          echo 'Production pipeline is intended to be triggered manually from Jenkins using the release branch.'
+        }
       }
     }
 
