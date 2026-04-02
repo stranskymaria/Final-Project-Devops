@@ -221,7 +221,11 @@ pipeline {
               keyFileVariable: 'SSH_KEY_FILE',
               usernameVariable: 'PROD_SSH_USER',
             )]) {
-              withEnv(["TARGET_SLOT=${env.LIVE_SLOT}"]) {
+              // Override both slot variables so the switch script cannot accidentally reuse the failed target slot.
+              withEnv([
+                "TARGET_SLOT=${env.LIVE_SLOT}",
+                "TARGET_DEPLOY_SLOT=${env.LIVE_SLOT}",
+              ]) {
                 sh 'bash scripts/switch-nginx-slot.sh'
               }
             }
