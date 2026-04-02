@@ -183,4 +183,4 @@ Backup characteristics:
   - SSH deployment
   - staging and production database passwords
 
-Test Rollback automat
+Test Pipelines
